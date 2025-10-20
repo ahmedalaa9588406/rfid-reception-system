@@ -1,0 +1,13 @@
+# Core dependencies
+sqlalchemy>=2.0.0
+pyserial>=3.5
+apscheduler>=3.10.0
+
+# GUI (included in Python standard library)
+# tkinter is included with Python
+
+# Packaging
+pyinstaller>=5.0.0
+
+# Development/Testing
+pytest>=7.0.0

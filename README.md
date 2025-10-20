@@ -137,3 +137,176 @@ Main screen:
 
 - Copies the .db file to a backup folder with a timestamp.
 - Example: `backup_2025-10-20_23-59.db`
+
+## Installation & Setup
+
+### Prerequisites
+
+- Python 3.10 or higher
+- Arduino with RFID reader (for hardware integration)
+- Windows OS (for .exe packaging)
+
+### Installation Steps
+
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/ahmedalaa9588406/rfid-reception-system.git
+   cd rfid-reception-system
+   ```
+
+2. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Run the application:**
+   ```bash
+   python -m rfid_reception.app
+   ```
+
+   Or if installed via setup.py:
+   ```bash
+   python setup.py install
+   rfid-reception
+   ```
+
+### Configuration
+
+On first run, a default configuration file is created at `config/config.json`. You can modify:
+
+- **serial_port**: COM port for Arduino (e.g., "COM3", "/dev/ttyUSB0")
+- **baud_rate**: Serial communication speed (default: 115200)
+- **employee_name**: Default employee name for transactions
+- **backup_dir**: Directory for database backups
+- **backup_time**: Time for automatic daily backup (HH:MM format)
+- **report_time**: Time for automatic daily report (HH:MM format)
+
+You can also configure these settings through the GUI Settings menu.
+
+## Usage
+
+### Starting the Application
+
+1. Launch the application
+2. Configure serial port in Settings if not automatically connected
+3. Click "Read Card" to detect an RFID card
+4. Enter amount or use quick amount buttons
+5. Click "Top-Up" to add balance to the card
+
+### Features
+
+- **Real-time Card Reading**: Communicate with Arduino to read RFID cards
+- **Balance Management**: Top-up cards with customizable amounts
+- **Transaction History**: View all transactions with date filters
+- **Reports**: Generate daily, weekly, or monthly CSV reports
+- **Automatic Backups**: Scheduled database backups at configured time
+- **Offline Operation**: Works completely offline, no internet required
+
+### Testing
+
+Run the test suite:
+```bash
+python -m pytest rfid_reception/tests/
+```
+
+Or run specific tests:
+```bash
+python -m unittest rfid_reception.tests.test_db
+```
+
+## Packaging to .exe
+
+To create a standalone Windows executable:
+
+1. **Install PyInstaller** (if not already installed):
+   ```bash
+   pip install pyinstaller
+   ```
+
+2. **Create the executable:**
+   ```bash
+   pyinstaller --onefile --windowed --name "RFID Reception" rfid_reception/app.py
+   ```
+
+3. **Find the executable:**
+   The .exe file will be in the `dist/` directory.
+
+### Advanced Packaging Options
+
+For a more complete package with all resources:
+```bash
+pyinstaller --onedir --windowed --name "RFID Reception" --add-data "config;config" rfid_reception/app.py
+```
+
+## Arduino Protocol
+
+The application expects the Arduino to respond to the following commands:
+
+### READ Command
+- **Send**: `READ\n`
+- **Response**: `UID:<card_uid>\n` or `ERROR:<message>\n`
+
+### WRITE Command
+- **Send**: `WRITE:<amount>\n`
+- **Response**: `OK:WROTE:<uid>:<amount>\n` or `ERROR:<message>\n`
+
+### PING Command
+- **Send**: `PING\n`
+- **Response**: Any response indicates connection is alive
+
+## Project Structure (Actual Implementation)
+
+```
+rfid-reception-system/
+├── rfid_reception/
+│   ├── __init__.py
+│   ├── app.py                  # Main entry point
+│   ├── gui/
+│   │   ├── __init__.py
+│   │   ├── main_window.py      # Main GUI window
+│   │   └── dialogs.py          # Settings, reports, transactions dialogs
+│   ├── services/
+│   │   ├── __init__.py
+│   │   ├── db_service.py       # Database CRUD operations
+│   │   └── serial_comm.py      # Arduino serial communication
+│   ├── models/
+│   │   ├── __init__.py
+│   │   └── schema.py           # SQLAlchemy models
+│   ├── reports.py              # CSV report generation
+│   ├── scheduler.py            # Automatic backups and reports
+│   ├── config/
+│   │   └── config.json         # Configuration file
+│   └── tests/
+│       ├── __init__.py
+│       └── test_db.py          # Database tests
+├── requirements.txt
+├── setup.py
+└── README.md
+```
+
+## Troubleshooting
+
+### Serial Connection Issues
+
+- Verify the COM port in Device Manager (Windows)
+- Ensure Arduino is connected and drivers are installed
+- Check baud rate matches Arduino sketch (default: 115200)
+- Try different USB ports
+
+### Database Locked Error
+
+- Close any other applications accessing the database
+- Check file permissions in the application directory
+
+### GUI Not Showing
+
+- Ensure tkinter is installed with Python
+- On Linux: `sudo apt-get install python3-tk`
+
+## License
+
+This project is open source and available under the MIT License.
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
