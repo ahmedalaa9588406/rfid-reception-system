@@ -196,11 +196,13 @@ You can also configure these settings through the GUI Settings menu.
 ### Features
 
 - **Real-time Card Reading**: Communicate with Arduino to read RFID cards
+- **Manual Entry Mode**: Enter card UIDs manually when Arduino is not available
 - **Balance Management**: Top-up cards with customizable amounts
 - **Transaction History**: View all transactions with date filters
 - **Reports**: Generate daily, weekly, or monthly CSV reports
 - **Automatic Backups**: Scheduled database backups at configured time
 - **Offline Operation**: Works completely offline, no internet required
+- **Dual Mode Operation**: Switch between Arduino mode and manual entry mode seamlessly
 
 ### Testing
 

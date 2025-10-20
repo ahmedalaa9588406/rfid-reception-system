@@ -44,21 +44,40 @@ When you first run the application:
    - Click "Test Connection" to verify
    - Click "Save"
 
-2. **Configure Without Arduino** (for testing):
+2. **Configure Without Arduino** (for testing or manual mode):
    - The app will work without Arduino connection
-   - You won't be able to read/write actual cards
-   - All other features (database, reports) will work
+   - Enable "Manual Entry Mode" to enter card UIDs manually
+   - You won't be able to read/write actual cards in manual mode
+   - All other features (database, reports) will work normally
+   - Perfect for offline transactions or when Arduino is unavailable
 
 ## Basic Usage
 
-### Top-Up a Card
+### Top-Up a Card (with Arduino)
 
-1. Connect Arduino with RFID reader (or skip if testing)
+1. Connect Arduino with RFID reader
 2. Click "Read Card" button
 3. Place RFID card near reader
 4. Enter amount or use quick amount buttons (10, 20, 50, 100 EGP)
 5. Click "Top-Up" button
 6. Confirm the transaction
+
+### Top-Up a Card (Manual Entry Mode)
+
+If Arduino is not connected or for manual transactions:
+
+1. Check the "Use Manual Entry" checkbox in the Manual Entry Mode section
+2. Enter the card UID manually in the text field (e.g., "CARD-123-456")
+3. Click "Load Card" to load the card from database
+4. Enter amount or use quick amount buttons (10, 20, 50, 100 EGP)
+5. Click "Top-Up" button
+6. Confirm the transaction
+
+**Note:** In manual entry mode:
+- The card is NOT physically written to (no Arduino required)
+- Transaction is saved to database with "Manual entry mode" note
+- Useful as a fallback when Arduino is unavailable
+- Great for processing manual transactions or corrections
 
 ### View Transactions
 
