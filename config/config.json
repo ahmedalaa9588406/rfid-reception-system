@@ -1,0 +1,9 @@
+{
+    "serial_port": "COM3",
+    "baud_rate": 115200,
+    "employee_name": "Receptionist",
+    "backup_dir": "backups",
+    "backup_time": "23:59",
+    "report_time": "23:55",
+    "db_path": "rfid_reception.db"
+}

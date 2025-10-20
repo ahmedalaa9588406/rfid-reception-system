@@ -141,3 +141,39 @@ class DatabaseService:
             raise
         finally:
             session.close()
+    
+    def log_card_read(self, card_uid, employee=None):
+        """
+        Log a card read event (audit trail).
+        
+        Args:
+            card_uid: The card UID that was read
+            employee: Optional employee name
+        """
+        session = self.Session()
+        try:
+            card = session.query(Card).filter_by(card_uid=card_uid).first()
+            if not card:
+                card = Card(card_uid=card_uid, balance=0.0)
+                session.add(card)
+            
+            # Create a read event transaction (type='read')
+            transaction = Transaction(
+                card_uid=card_uid,
+                type='read',
+                amount=0.0,
+                balance_after=card.balance,
+                employee=employee,
+                notes='Card read from Arduino'
+            )
+            session.add(transaction)
+            session.commit()
+            
+            logger.info(f"Card read event logged: {card_uid}")
+            return transaction.id
+        except SQLAlchemyError as e:
+            session.rollback()
+            logger.error(f"Error logging card read event: {e}")
+            raise
+        finally:
+            session.close()
