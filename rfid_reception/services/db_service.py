@@ -124,17 +124,29 @@ class DatabaseService:
             session.close()
     
     def get_all_cards(self):
-        """Get all cards."""
+        """Get all cards with their most recent employee information."""
         session = self.Session()
         try:
             cards = session.query(Card).all()
-            result = [{
-                'id': c.id,
-                'card_uid': c.card_uid,
-                'balance': c.balance,
-                'created_at': c.created_at,
-                'last_topped_at': c.last_topped_at
-            } for c in cards]
+            result = []
+            
+            for c in cards:
+                # Get the most recent transaction for this card to fetch employee info
+                recent_transaction = session.query(Transaction).filter_by(
+                    card_uid=c.card_uid
+                ).order_by(Transaction.timestamp.desc()).first()
+                
+                employee_name = recent_transaction.employee if recent_transaction else 'N/A'
+                
+                result.append({
+                    'id': c.id,
+                    'card_uid': c.card_uid,
+                    'balance': c.balance,
+                    'created_at': c.created_at,
+                    'last_topped_at': c.last_topped_at,
+                    'employee_name': employee_name
+                })
+            
             return result
         except SQLAlchemyError as e:
             logger.error(f"Error getting all cards: {e}")

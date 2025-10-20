@@ -6,6 +6,12 @@ apscheduler>=3.10.0
 # GUI (included in Python standard library)
 # tkinter is included with Python
 
+# PDF Reports and Arabic Support
+reportlab>=4.0.0
+matplotlib>=3.7.0
+python-bidi>=0.4.2
+arabic-reshaper>=3.0.0
+
 # Packaging
 pyinstaller>=5.0.0
 

@@ -102,6 +102,14 @@ class ModernReportsDialog:
                 value=value
             ).pack(anchor=tk.W, pady=5)
         
+        # Arabic language option
+        self.arabic_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            format_frame,
+            text="🌐 Enable Arabic (تفعيل اللغة العربية)",
+            variable=self.arabic_var
+        ).pack(anchor=tk.W, pady=(10, 0))
+        
         # Status
         self.status_var = tk.StringVar(value="Ready to generate report")
         status_label = ttk.Label(
@@ -273,27 +281,37 @@ class ModernReportsDialog:
             try:
                 report_type = self.report_type_var.get()
                 output_format = self.format_var.get()
+                use_arabic = self.arabic_var.get()
+                
+                # Temporarily set Arabic mode
+                original_arabic_setting = self.reports_generator.use_arabic
+                self.reports_generator.use_arabic = use_arabic
+                
                 result = None
                 
-                if report_type == "daily":
-                    date = self.date_var.get()
-                    result = self.reports_generator.generate_daily_report(date, output_format)
-                
-                elif report_type == "weekly":
-                    week_start = self.week_start_var.get()
-                    result = self.reports_generator.generate_weekly_report(week_start, output_format)
-                
-                elif report_type == "monthly":
-                    month = self.month_var.get()
-                    year = self.year_var.get()
-                    result = self.reports_generator.generate_monthly_report(month, year, output_format)
-                
-                elif report_type == "custom":
-                    start_date = self.start_date_var.get()
-                    end_date = self.end_date_var.get()
-                    result = self.reports_generator.generate_custom_report(
-                        start_date, end_date, output_format=output_format
-                    )
+                try:
+                    if report_type == "daily":
+                        date = self.date_var.get()
+                        result = self.reports_generator.generate_daily_report(date, output_format)
+                    
+                    elif report_type == "weekly":
+                        week_start = self.week_start_var.get()
+                        result = self.reports_generator.generate_weekly_report(week_start, output_format)
+                    
+                    elif report_type == "monthly":
+                        month = self.month_var.get()
+                        year = self.year_var.get()
+                        result = self.reports_generator.generate_monthly_report(month, year, output_format)
+                    
+                    elif report_type == "custom":
+                        start_date = self.start_date_var.get()
+                        end_date = self.end_date_var.get()
+                        result = self.reports_generator.generate_custom_report(
+                            start_date, end_date, output_format=output_format
+                        )
+                finally:
+                    # Restore original setting
+                    self.reports_generator.use_arabic = original_arabic_setting
                 
                 self.dialog.after(0, lambda: self._on_report_generated(result))
             

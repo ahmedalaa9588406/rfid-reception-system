@@ -72,6 +72,13 @@ except ImportError:
     HAS_BIDI = False
     logging.warning("python-bidi not installed. Arabic RTL support will be limited.")
 
+try:
+    from arabic_reshaper import reshape
+    HAS_ARABIC_RESHAPER = True
+except ImportError:
+    HAS_ARABIC_RESHAPER = False
+    logging.warning("arabic-reshaper not installed. Arabic text will not be properly connected.")
+
 
 class ArabicTextHelper:
     """Helper class for Arabic text handling and RTL support."""
@@ -129,10 +136,15 @@ class ArabicTextHelper:
             
     @classmethod
     def process_arabic_text(cls, text: str) -> str:
-        """Apply BiDi algorithm for correct RTL rendering."""
-        if HAS_BIDI:
-            return get_display(text)
-        return text
+        """Apply Arabic reshaping and BiDi algorithm for correct RTL rendering."""
+        try:
+            # Step 1: reshape to connect Arabic letters (presentation forms)
+            reshaped = reshape(text) if 'HAS_ARABIC_RESHAPER' in globals() and HAS_ARABIC_RESHAPER else text
+            # Step 2: apply BiDi to reorder for RTL display
+            return get_display(reshaped) if HAS_BIDI else reshaped
+        except Exception as e:
+            logger.warning(f"Arabic text processing failed for text: {text[:50]}... Error: {e}")
+            return text
 
 
 class ModernPDFHeaderFooter(PageTemplate):
@@ -671,73 +683,335 @@ class ReportsGenerator(ModernReportsGenerator):
 
 # Remove PyQt imports and use Tkinter instead
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import logging
+from datetime import datetime
 
-# Remove the PyQt-based ViewAllCardsDialog class and replace with Tkinter version
 class ViewAllCardsDialog(tk.Toplevel):
+    """Modern UI for viewing all cards with enhanced visual appeal."""
+    
+    # Modern color palette
+    PRIMARY_COLOR = "#2E86AB"
+    SECONDARY_COLOR = "#A23B72"
+    SUCCESS_COLOR = "#06A77D"
+    WARNING_COLOR = "#F18F01"
+    LIGHT_BG = "#F5F5F5"
+    CARD_BG = "#FFFFFF"
+    TEXT_PRIMARY = "#2C3E50"
+    TEXT_SECONDARY = "#555555"
+    BORDER_COLOR = "#E0E0E0"
+    
     def __init__(self, parent, db_service):
         super().__init__(parent)
         self.db_service = db_service
-        self.title("View All Cards")
-        self.geometry("800x600")
+        self.title("Card Management System - View All Cards")
+        self.geometry("1000x700")
         self.resizable(True, True)
+        self.minsize(800, 500)
+        
+        # Configure window style
+        self.configure(bg=self.LIGHT_BG)
         
         # Fetch cards data
         try:
-            self.cards = self.db_service.get_all_cards()  # Assume this method exists; adjust if needed
+            self.cards = self.db_service.get_all_cards()
         except AttributeError:
-            self.cards = []  # Fallback if method doesn't exist
+            self.cards = []
             logging.warning("db_service.get_all_cards() not found; using empty list")
         
+        self.filtered_cards = self.cards.copy()
+        self.setup_styles()
         self.setup_ui()
         self.protocol("WM_DELETE_WINDOW", self.on_close)
     
+    def setup_styles(self):
+        """Configure modern ttk styles."""
+        style = ttk.Style()
+        style.theme_use('clam')
+        
+        # Configure colors for the theme
+        style.configure('Treeview', 
+                       background=self.CARD_BG,
+                       foreground=self.TEXT_PRIMARY,
+                       fieldbackground=self.CARD_BG,
+                       borderwidth=0,
+                       font=('Segoe UI', 10))
+        style.map('Treeview', 
+                 background=[('selected', self.PRIMARY_COLOR)],
+                 foreground=[('selected', 'white')])
+        
+        style.configure('Treeview.Heading',
+                       background=self.PRIMARY_COLOR,
+                       foreground='white',
+                       borderwidth=1,
+                       font=('Segoe UI', 11, 'bold'))
+        style.map('Treeview.Heading',
+                 background=[('active', self.SECONDARY_COLOR)])
+        
+        # Modern buttons
+        style.configure('Modern.TButton',
+                       font=('Segoe UI', 10, 'bold'),
+                       padding=10,
+                       relief='flat',
+                       borderwidth=0)
+        
+        style.configure('Primary.TButton',
+                       background=self.PRIMARY_COLOR,
+                       font=('Segoe UI', 10, 'bold'),
+                       padding=10)
+        style.map('Primary.TButton',
+                 background=[('active', self.SECONDARY_COLOR)])
+        
+        style.configure('Success.TButton',
+                       background=self.SUCCESS_COLOR,
+                       font=('Segoe UI', 10, 'bold'),
+                       padding=10)
+        style.map('Success.TButton',
+                 background=[('active', '#059969')])
+    
     def setup_ui(self):
-        # Main frame
-        main_frame = ttk.Frame(self, padding="10")
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        """Build the modern UI."""
+        # Header section
+        self._create_header()
         
-        # Title
-        title_label = ttk.Label(main_frame, text="All Cards", font=("Arial", 16, "bold"))
-        title_label.pack(pady=10)
+        # Statistics panel
+        self._create_stats_panel()
         
-        # Cards table
-        columns = ("UID", "Balance", "Created At", "Last Top-Up")
-        self.tree = ttk.Treeview(main_frame, columns=columns, show="headings", height=15)
-        for col in columns:
+        # Search and filter section
+        self._create_search_section()
+        
+        # Table section with separator
+        separator = ttk.Separator(self, orient='horizontal')
+        separator.pack(fill='x', padx=15, pady=10)
+        
+        self._create_table_section()
+        
+        # Footer with action buttons
+        self._create_footer()
+    
+    def _create_header(self):
+        """Create attractive header section."""
+        header_frame = tk.Frame(self, bg=self.PRIMARY_COLOR, height=80)
+        header_frame.pack(fill='x', side='top')
+        header_frame.pack_propagate(False)
+        
+        # Title with icon representation
+        title_frame = tk.Frame(header_frame, bg=self.PRIMARY_COLOR)
+        title_frame.pack(fill='both', expand=True, padx=20, pady=15)
+        
+        title_label = tk.Label(title_frame, 
+                              text="🎫 Card Management System",
+                              font=('Segoe UI', 18, 'bold'),
+                              fg='white',
+                              bg=self.PRIMARY_COLOR)
+        title_label.pack(side='left')
+        
+        subtitle_label = tk.Label(title_frame,
+                                 text=f"Viewing {len(self.cards)} card(s)",
+                                 font=('Segoe UI', 11),
+                                 fg='#E8F4F8',
+                                 bg=self.PRIMARY_COLOR)
+        subtitle_label.pack(side='left', padx=(20, 0))
+    
+    def _create_stats_panel(self):
+        """Create statistics panel showing key metrics."""
+        stats_frame = tk.Frame(self, bg=self.LIGHT_BG)
+        stats_frame.pack(fill='x', padx=15, pady=15)
+        
+        # Calculate statistics
+        total_balance = sum(card.get('balance', 0) for card in self.cards)
+        avg_balance = total_balance / len(self.cards) if self.cards else 0
+        total_cards = len(self.cards)
+        
+        stats_data = [
+            ("📊 Total Cards", str(total_cards), self.PRIMARY_COLOR),
+            ("💰 Total Balance", f"EGP {total_balance:,.2f}", self.SUCCESS_COLOR),
+            ("📈 Average Balance", f"EGP {avg_balance:,.2f}", self.SECONDARY_COLOR),
+        ]
+        
+        for i, (label, value, color) in enumerate(stats_data):
+            self._create_stat_card(stats_frame, label, value, color, i)
+    
+    def _create_stat_card(self, parent, label, value, color, index):
+        """Create individual stat card."""
+        card = tk.Frame(parent, bg=self.CARD_BG, relief='flat', bd=1)
+        card.configure(highlightbackground=self.BORDER_COLOR, highlightthickness=1)
+        card.pack(side='left', expand=True, fill='both', padx=(0, 10) if index < 2 else 0)
+        
+        label_widget = tk.Label(card,
+                               text=label,
+                               font=('Segoe UI', 10),
+                               fg=self.TEXT_SECONDARY,
+                               bg=self.CARD_BG)
+        label_widget.pack(padx=15, pady=8, anchor='w')
+        
+        value_widget = tk.Label(card,
+                               text=value,
+                               font=('Segoe UI', 14, 'bold'),
+                               fg=color,
+                               bg=self.CARD_BG)
+        value_widget.pack(padx=15, pady=(0, 8), anchor='w')
+    
+    def _create_search_section(self):
+        """Create search and filter controls."""
+        search_frame = tk.Frame(self, bg=self.LIGHT_BG)
+        search_frame.pack(fill='x', padx=15, pady=(0, 15))
+        
+        search_label = tk.Label(search_frame,
+                               text="🔍 Search Cards",
+                               font=('Segoe UI', 10, 'bold'),
+                               fg=self.TEXT_PRIMARY,
+                               bg=self.LIGHT_BG)
+        search_label.pack(side='left', padx=(0, 10))
+        
+        search_entry = tk.Entry(search_frame,
+                               font=('Segoe UI', 10),
+                               width=30,
+                               relief='flat',
+                               bd=1)
+        search_entry.configure(highlightbackground=self.BORDER_COLOR, 
+                              highlightthickness=1,
+                              bg=self.CARD_BG)
+        search_entry.pack(side='left', padx=(0, 10), ipady=5)
+        search_entry.bind('<KeyRelease>', lambda e: self._filter_cards(search_entry.get()))
+        
+        # Clear button
+        clear_btn = tk.Label(search_frame,
+                            text="✕",
+                            font=('Segoe UI', 12),
+                            fg=self.WARNING_COLOR,
+                            bg=self.LIGHT_BG,
+                            cursor='hand2')
+        clear_btn.pack(side='left', padx=5)
+        clear_btn.bind('<Button-1>', lambda e: (search_entry.delete(0, 'end'), 
+                                                 self._filter_cards('')))
+    
+    def _filter_cards(self, search_text):
+        """Filter cards based on search text."""
+        self.filtered_cards = [
+            card for card in self.cards
+            if search_text.lower() in card.get('card_uid', '').lower()
+        ]
+        self._populate_table()
+    
+    def _create_table_section(self):
+        """Create the cards table with modern styling."""
+        table_frame = tk.Frame(self, bg=self.LIGHT_BG)
+        table_frame.pack(fill='both', expand=True, padx=15, pady=(0, 15))
+        
+        # Scrollbar styling
+        scrollbar = ttk.Scrollbar(table_frame)
+        scrollbar.pack(side='right', fill='y')
+        
+        columns = ("UID", "Balance", "Employee", "Created At", "Last Top-Up", "Status")
+        self.tree = ttk.Treeview(table_frame, 
+                                columns=columns,
+                                show='headings',
+                                height=15,
+                                yscrollcommand=scrollbar.set)
+        
+        scrollbar.config(command=self.tree.yview)
+        
+        # Configure columns
+        col_widths = [140, 110, 130, 120, 120, 80]
+        col_anchors = ['w', 'center', 'w', 'center', 'center', 'center']
+        
+        for i, (col, width, anchor) in enumerate(zip(columns, col_widths, col_anchors)):
             self.tree.heading(col, text=col)
-            self.tree.column(col, width=150, anchor=tk.CENTER)
-        self.tree.pack(fill=tk.BOTH, expand=True, pady=10)
+            self.tree.column(col, width=width, anchor=anchor)
         
-        # Populate table
-        for card in self.cards:
+        # Add alternating row colors
+        self.tree.tag_configure('oddrow', background=self.CARD_BG)
+        self.tree.tag_configure('evenrow', background='#F9F9F9')
+        self.tree.tag_configure('positive', foreground=self.SUCCESS_COLOR)
+        
+        self.tree.pack(fill='both', expand=True)
+        self._populate_table()
+    
+    def _populate_table(self):
+        """Populate the table with card data."""
+        # Clear existing items
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        
+        # Populate with filtered cards
+        for i, card in enumerate(self.filtered_cards):
             uid = card.get('card_uid', 'N/A')
-            balance = f"{card.get('balance', 0):.2f} EGP"
-            created = card.get('created_at', 'N/A').strftime('%Y-%m-%d') if card.get('created_at') else 'N/A'
-            last_topup = card.get('last_topped_at', 'N/A').strftime('%Y-%m-%d') if card.get('last_topped_at') else 'N/A'
-            self.tree.insert("", tk.END, values=(uid, balance, created, last_topup))
+            balance = card.get('balance', 0)
+            employee = card.get('employee_name', 'N/A')
+            created = card.get('created_at', 'N/A')
+            created_str = created.strftime('%Y-%m-%d') if created else 'N/A'
+            last_topup = card.get('last_topped_at', 'N/A')
+            last_topup_str = last_topup.strftime('%Y-%m-%d') if last_topup else 'Never'
+            
+            # Determine status
+            status = "✓ Active" if balance > 0 else "⚠ Empty"
+            
+            values = (
+                uid[:12] + '...' if len(uid) > 12 else uid,
+                f"EGP {balance:.2f}",
+                employee if employee != 'N/A' else 'N/A',
+                created_str,
+                last_topup_str,
+                status
+            )
+            
+            tag = 'evenrow' if i % 2 == 0 else 'oddrow'
+            self.tree.insert('', 'end', values=values, tags=(tag, 'positive' if balance > 0 else ''))
+    
+    def _create_footer(self):
+        """Create footer with action buttons."""
+        footer_frame = tk.Frame(self, bg=self.LIGHT_BG)
+        footer_frame.pack(fill='x', padx=15, pady=15)
         
-        # Buttons frame
-        button_frame = ttk.Frame(main_frame)
-        button_frame.pack(pady=10)
+        # Left side info
+        info_label = tk.Label(footer_frame,
+                             text=f"Showing {len(self.filtered_cards)} of {len(self.cards)} cards",
+                             font=('Segoe UI', 9),
+                             fg=self.TEXT_SECONDARY,
+                             bg=self.LIGHT_BG)
+        info_label.pack(side='left')
         
-        # Export Arabic PDF button
-        export_btn = ttk.Button(button_frame, text="Export Arabic PDF", command=self.export_arabic_pdf)
-        export_btn.pack(side=tk.LEFT, padx=5)
+        # Spacer
+        spacer = tk.Frame(footer_frame, bg=self.LIGHT_BG)
+        spacer.pack(side='left', expand=True)
         
-        # Close button
-        close_btn = ttk.Button(button_frame, text="Close", command=self.on_close)
-        close_btn.pack(side=tk.LEFT, padx=5)
+        # Action buttons
+        button_frame = tk.Frame(footer_frame, bg=self.LIGHT_BG)
+        button_frame.pack(side='right')
+        
+        export_btn = tk.Button(button_frame,
+                              text="📄 Export Arabic PDF",
+                              font=('Segoe UI', 10, 'bold'),
+                              bg=self.SUCCESS_COLOR,
+                              fg='white',
+                              relief='flat',
+                              cursor='hand2',
+                              padx=15,
+                              pady=8,
+                              command=self.export_arabic_pdf)
+        export_btn.pack(side='left', padx=(0, 10))
+        
+        close_btn = tk.Button(button_frame,
+                             text="✕ Close",
+                             font=('Segoe UI', 10, 'bold'),
+                             bg='#E8E8E8',
+                             fg=self.TEXT_PRIMARY,
+                             relief='flat',
+                             cursor='hand2',
+                             padx=15,
+                             pady=8,
+                             command=self.on_close)
+        close_btn.pack(side='left')
     
     def export_arabic_pdf(self):
         """Export all cards to an Arabic PDF report."""
         if not self.cards:
-            messagebox.showwarning("No Cards", "No cards available to export.", parent=self)
+            messagebox.showwarning("No Cards", 
+                                 "No cards available to export.",
+                                 parent=self)
             return
         
-        # Prompt user for save location
-        from datetime import datetime
         default_filename = f"arabic_cards_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
         output_path = filedialog.asksaveasfilename(
             parent=self,
@@ -748,21 +1022,23 @@ class ViewAllCardsDialog(tk.Toplevel):
         )
         
         if not output_path:
-            messagebox.showinfo("Cancelled", "Export cancelled.", parent=self)
             return
         
         try:
-            # Instantiate the reports generator
             generator = ModernReportsGenerator(self.db_service, use_arabic=True)
-            
-            # Generate the report with the selected path
-            final_path = generator.generate_beautiful_arabic_report(self.cards, output_path=output_path)
-            
-            messagebox.showinfo("Export Successful", f"Arabic PDF report saved to: {final_path}", parent=self)
+            final_path = generator.generate_beautiful_arabic_report(self.cards, 
+                                                                   output_path=output_path)
+            messagebox.showinfo("Export Successful",
+                              f"Arabic PDF report saved to:\n{final_path}",
+                              parent=self)
         except ImportError as e:
-            messagebox.showerror("Missing Dependencies", f"Required libraries are missing: {e}", parent=self)
+            messagebox.showerror("Missing Dependencies",
+                               f"Required libraries are missing:\n{e}",
+                               parent=self)
         except Exception as e:
-            messagebox.showerror("Export Failed", f"An error occurred: {e}", parent=self)
+            messagebox.showerror("Export Failed",
+                               f"An error occurred:\n{e}",
+                               parent=self)
     
     def on_close(self):
         self.destroy()

@@ -1,5 +1,5 @@
 """
-Dialog for generating various reports.
+Dialog for generating various reports (PDF only).
 """
 
 import tkinter as tk
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class ReportDialog:
-    """Dialog to generate reports."""
+    """Dialog to generate PDF reports."""
 
     def __init__(self, parent: tk.Widget, reports_generator: ModernReportsGenerator):
         self.parent = parent
@@ -20,7 +20,7 @@ class ReportDialog:
 
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("📊 Generate Reports")
-        self.dialog.geometry("400x300")
+        self.dialog.geometry("500x400")
         self.dialog.transient(parent)
 
         self._create_widgets()
@@ -29,24 +29,56 @@ class ReportDialog:
         self.dialog.focus_force()
 
     def _create_widgets(self):
+        """Create report generation dialog widgets."""
         frame = ttk.Frame(self.dialog, padding="20")
         frame.pack(fill=tk.BOTH, expand=True)
 
-        ttk.Label(frame, text="Select Report Type:").pack(pady=5)
+        # Title
+        ttk.Label(frame, text="📊 Report Generator", 
+                 font=('Segoe UI', 14, 'bold')).pack(pady=(0, 20))
 
+        # Report Type
+        ttk.Label(frame, text="Select Report Type:").pack(anchor=tk.W, pady=(10, 5))
         self.report_type = tk.StringVar(value="daily")
-        ttk.Combobox(frame, textvariable=self.report_type, values=["daily", "weekly", "monthly"]).pack(pady=5)
+        report_combo = ttk.Combobox(
+            frame, 
+            textvariable=self.report_type, 
+            values=["daily", "weekly", "monthly"],
+            state='readonly'
+        )
+        report_combo.pack(fill=tk.X, pady=(0, 15))
 
-        ttk.Label(frame, text="Output Format:").pack(pady=5)
-        self.format = tk.StringVar(value="both")
-        ttk.Combobox(frame, textvariable=self.format, values=["csv", "pdf", "both"]).pack(pady=5)
+        # Buttons
+        button_frame = ttk.Frame(frame)
+        button_frame.pack(fill=tk.X, pady=20)
 
-        ttk.Button(frame, text="Generate", command=self._generate).pack(pady=10)
-        ttk.Button(frame, text="Close", command=self.dialog.destroy).pack()
+        ttk.Button(
+            button_frame, 
+            text="✓ Generate PDF", 
+            command=self._generate
+        ).pack(side=tk.LEFT, padx=(0, 10))
+
+        ttk.Button(
+            button_frame, 
+            text="✕ Close", 
+            command=self.dialog.destroy
+        ).pack(side=tk.LEFT)
 
     def _generate(self):
+        """Generate PDF report."""
         try:
-            result = getattr(self.reports_generator, f"generate_{self.report_type.get()}_report")(output_format=self.format.get())
-            messagebox.showinfo("Success", f"Report generated: {result}")
+            report_type = self.report_type.get()
+            method_name = f"generate_{report_type}_report"
+            
+            if not hasattr(self.reports_generator, method_name):
+                raise ValueError(f"Report type '{report_type}' not supported")
+            
+            result = getattr(self.reports_generator, method_name)()
+            messagebox.showinfo(
+                "Success", 
+                f"PDF Report generated successfully!\n\nSaved to:\n{result}"
+            )
+            self.dialog.destroy()
         except Exception as e:
-            messagebox.showerror("Error", str(e))
+            messagebox.showerror("Error", f"Failed to generate report:\n{str(e)}")
+            logger.error(f"Report generation error: {e}", exc_info=True)

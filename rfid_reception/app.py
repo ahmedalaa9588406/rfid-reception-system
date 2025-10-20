@@ -9,7 +9,7 @@ import sys
 
 from rfid_reception.services.db_service import DatabaseService
 from rfid_reception.services.serial_comm import SerialCommunicationService
-from rfid_reception.reports import ReportsGenerator
+from rfid_reception.reports import ModernReportsGenerator
 from rfid_reception.scheduler import TaskScheduler
 from rfid_reception.gui.main_window import MainWindow
 
@@ -96,7 +96,7 @@ def main():
             logger.info("You can configure serial connection in Settings")
         
         # Reports generator
-        reports_generator = ReportsGenerator(db_service, output_dir='reports')
+        reports_generator = ModernReportsGenerator(db_service, output_dir='reports')
         logger.info("Reports generator initialized")
         
         # Scheduler
