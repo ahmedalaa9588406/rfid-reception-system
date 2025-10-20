@@ -237,7 +237,7 @@ The RFID Reception System is now **fully implemented and ready for use**. All co
 ### What Was Added
 
 #### 1. Manual Entry UI Components
-**File**: `rfid_reception/gui/main_window.py` (+118 lines, -27 lines)
+**File**: `rfid_reception/gui/main_window.py` (+121 insertions, -27 deletions)
 
 - **Manual Mode Toggle**: Checkbox to switch between Arduino and manual modes
 - **Manual UID Entry**: Text field for entering card UIDs manually
@@ -300,9 +300,14 @@ The RFID Reception System is now **fully implemented and ready for use**. All co
 
 ### Statistics
 
-- **Code Added**: ~400 lines of implementation + tests
-- **Documentation**: ~10,000 words
-- **Test Coverage**: 9 new tests, all passing
+- **Code Added**: 769 insertions, 32 deletions (net +737 lines)
+  - main_window.py: +121 insertions, -27 deletions (net +94 lines)
+  - test_manual_mode.py: 135 lines
+  - test_manual_mode_integration.py: 139 lines
+- **Documentation**: 377 lines added
+  - MANUAL_ENTRY_MODE.md: 260 lines (approximately 1,267 words)
+  - Other documentation updates: 117 lines
+- **Test Coverage**: 9 new tests, all passing (16/16 total)
 - **Files Modified**: 1
 - **Files Created**: 3
 
