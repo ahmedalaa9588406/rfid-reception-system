@@ -17,6 +17,8 @@ git clone https://github.com/ahmedalaa9588406/rfid-reception-system.git
 cd rfid-reception-system
 ```
 
+> **Note**: Replace the URL above with your forked repository URL if you're working with a fork.
+
 ### Step 2: Install Python Dependencies
 
 ```bash
