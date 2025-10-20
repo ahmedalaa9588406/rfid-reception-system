@@ -177,3 +177,24 @@ class DatabaseService:
             raise
         finally:
             session.close()
+    
+    def delete_card(self, card_uid):
+        """Delete a card and all its transactions."""
+        session = self.Session()
+        try:
+            # Delete all transactions for this card
+            session.query(Transaction).filter_by(card_uid=card_uid).delete()
+            
+            # Delete the card itself
+            card = session.query(Card).filter_by(card_uid=card_uid).first()
+            if card:
+                session.delete(card)
+            
+            session.commit()
+            logger.info(f"Card {card_uid} and its transactions deleted")
+        except SQLAlchemyError as e:
+            session.rollback()
+            logger.error(f"Error deleting card {card_uid}: {e}")
+            raise
+        finally:
+            session.close()

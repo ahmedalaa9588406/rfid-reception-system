@@ -1,9 +1,10 @@
 """Main GUI window for RFID Reception System."""
 
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import logging
 from datetime import datetime
+from rfid_reception.reports import ModernReportsGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,7 @@ class MainWindow:
         self.root = root
         self.db_service = db_service
         self.serial_service = serial_service
-        self.reports_generator = reports_generator
+        self.reports_generator = ModernReportsGenerator(db_service)
         self.scheduler = scheduler
         self.config = config
 
@@ -93,6 +94,12 @@ class MainWindow:
             side=tk.LEFT, padx=5, fill=tk.X, expand=True
         )
         ttk.Button(actions_frame, text="View All Cards", command=self._show_all_cards).pack(
+            side=tk.LEFT, padx=5, fill=tk.X, expand=True
+        )
+        ttk.Button(actions_frame, text="Insert Card Manual", command=self._show_manual_card_insert).pack(
+            side=tk.LEFT, padx=5, fill=tk.X, expand=True
+        )
+        ttk.Button(actions_frame, text="Export to PDF", command=self._export_cards_to_pdf).pack(
             side=tk.LEFT, padx=5, fill=tk.X, expand=True
         )
 
@@ -223,7 +230,7 @@ class MainWindow:
 
     def _show_all_cards(self):
         """Show all cards dialog."""
-        from rfid_reception.gui.dialogs import ViewAllCardsDialog
+        from rfid_reception.gui.dialogs.view_all_cards_dialog import ViewAllCardsDialog
 
         ViewAllCardsDialog(self.root, self.db_service)
 
@@ -370,9 +377,49 @@ class MainWindow:
         messagebox.showinfo("Settings", "Settings saved!")
 
     def _show_all_cards(self):
-        from rfid_reception.gui.dialogs import ViewAllCardsDialog
+        from rfid_reception.gui.dialogs.view_all_cards_dialog import ViewAllCardsDialog
         ViewAllCardsDialog(self.root, self.db_service)
 
     def _show_manual_card_insert(self):
-        from rfid_reception.gui.dialogs import ManualCardInsertDialog
+        from rfid_reception.gui.dialogs.manual_card_insert_dialog import ManualCardInsertDialog
         ManualCardInsertDialog(self.root, self.db_service)
+
+    def _export_cards_to_pdf(self):
+        """Export selected cards to a PDF file."""
+        selected_cards = self._get_selected_cards()
+        if not selected_cards:
+            messagebox.showwarning("No Selection", "Please select cards to export.")
+            return
+
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".pdf",
+            filetypes=[("PDF files", "*.pdf")],
+            initialfile=f"cards_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        )
+        if not file_path:
+            return
+
+        try:
+            transactions_map = {}
+            for card in selected_cards:
+                try:
+                    transactions_map[card['card_uid']] = self.db_service.get_transactions(card_uid=card['card_uid'])
+                except Exception as e:
+                    logging.error(f"Failed to fetch transactions for card {card['card_uid']}: {e}")
+                    transactions_map[card['card_uid']] = []
+
+            self.reports_generator.generate_cards_pdf(
+                cards=selected_cards,
+                transactions_map=transactions_map,
+                output_path=file_path
+            )
+            messagebox.showinfo("Export Successful", f"PDF exported successfully to:\n{file_path}")
+        except Exception as e:
+            logging.error(f"Error exporting cards to PDF: {e}")
+            messagebox.showerror("Export Failed", f"An error occurred while exporting to PDF:\n{e}")
+
+    def _get_selected_cards(self):
+        """Retrieve selected cards from the UI."""
+        # Implement logic to fetch selected cards based on your UI structure.
+        # This is a placeholder and should be replaced with actual implementation.
+        return []

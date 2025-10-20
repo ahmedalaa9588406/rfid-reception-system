@@ -1,859 +1,768 @@
 """
-Modern, feature-rich dialog for viewing and managing all cards in the database.
-Includes advanced filtering, sorting, batch operations, and a polished UI.
+Modern, professional PDF reports generator for transactions.
+Produces visually impressive, well-structured reports with charts and statistics.
+Enhanced with modern design, RTL Arabic support, and professional styling.
 """
 
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
 import logging
-from datetime import datetime
-from typing import List, Dict, Optional, Callable
-from threading import Thread
-from enum import Enum
-import csv
-from dataclasses import dataclass
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import List, Dict, Optional, Tuple
+from io import BytesIO
+import json
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont 
+from tkinter import Toplevel, messagebox
+from tkinter import ttk
+from tkinter import filedialog
+
+# --- FONT CONFIGURATION ---
+# IMPORTANT: This path must be correct for the script environment.
+ARABIC_FONT_FILE = "NotoSansArabic-VariableFont_wdth,wght.ttf"
+# Updated path: relative to project root (rfid_reception/) instead of dialogs/
+ARABIC_FONT_PATH = Path(__file__).parent.parent.parent / "assets" / "fonts" / ARABIC_FONT_FILE
+ARABIC_FONT_NAME = "NotoArabic"
 
 logger = logging.getLogger(__name__)
 
-
-class TransactionType(Enum):
-    """Transaction type enumeration."""
-    TOPUP = "topup"
-    READ = "read"
-
-
-@dataclass
-class CardData:
-    """Card data model."""
-    card_uid: str
-    balance: float
-    created_at: Optional[datetime]
-    last_topped_at: Optional[datetime]
-    transaction_count: int = 0
-
-
-class ModernViewAllCardsDialog:
-    """Modern, feature-rich dialog to display and manage all cards in the database."""
+# Try to register the Arabic font; fall back gracefully if it fails
+try:
+    # Use Path().as_posix() to ensure cross-platform compatibility for TTFont
+    pdfmetrics.registerFont(TTFont(ARABIC_FONT_NAME, ARABIC_FONT_PATH.as_posix()))
+    pdfmetrics.registerFont(TTFont(f"{ARABIC_FONT_NAME}-Bold", ARABIC_FONT_PATH.as_posix()))
     
-    # Color scheme - Modern gradient
-    PRIMARY_COLOR = "#2E86AB"
-    SECONDARY_COLOR = "#A23B72"
-    SUCCESS_COLOR = "#06A77D"
-    WARNING_COLOR = "#F18F01"
-    DANGER_COLOR = "#C1121F"
-    NEUTRAL_BG = "#F5F5F5"
-    DARK_BG = "#1E1E1E"
-    LIGHT_TEXT = "#FFFFFF"
-    DARK_TEXT = "#2C3E50"
-    BORDER_COLOR = "#E0E0E0"
+    ARABIC_REPORTLAB_FONT = ARABIC_FONT_NAME 
+    logger.info(f"ReportLab Arabic font '{ARABIC_FONT_NAME}' registered.")
+except Exception as e:
+    ARABIC_REPORTLAB_FONT = "Helvetica" 
+    logger.warning(f"Failed to register NotoSansArabic font. PDF generation will use default: {e}")
+
+try:
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import letter, A4, landscape
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import inch
+    from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT, TA_JUSTIFY
+    from reportlab.platypus import (
+        SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak, 
+        Image, KeepTogether, Frame, PageTemplate, Flowable
+    )
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.colors import HexColor
+    HAS_REPORTLAB = True
+except ImportError:
+    HAS_REPORTLAB = False
+    logging.warning("reportlab not installed. PDF generation will be unavailable.")
+
+try:
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as mpatches
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    HAS_MATPLOTLIB = True
+except ImportError:
+    HAS_MATPLOTLIB = False
+    logging.warning("matplotlib not installed. Charts will be unavailable.")
+
+try:
+    from bidi.algorithm import get_display
+    HAS_BIDI = True
+except ImportError:
+    HAS_BIDI = False
+    logging.warning("python-bidi not installed. Arabic RTL support will be limited.")
+
+
+class ArabicTextHelper:
+    """Helper class for Arabic text handling and RTL support."""
     
-    # Icon Unicode characters
-    ICON_SEARCH = "🔍"
-    ICON_REFRESH = "🔄"
-    ICON_EXPORT = "📊"
-    ICON_DELETE = "🗑️"
-    ICON_DETAILS = "👁️"
-    ICON_SORT = "⬍"
+    ARABIC_NUMERALS = '٠١٢٣٤٥٦٧٨٩'
+    WESTERN_NUMERALS = '0123456789'
     
-    def __init__(self, parent: tk.Widget, db_service, enable_dark_mode: bool = False):
-        """
-        Initialize the modern cards dialog.
-        
-        Args:
-            parent: Parent window
-            db_service: Database service instance
-            enable_dark_mode: Enable dark mode theme
-        """
-        self.parent = parent
-        self.db_service = db_service
-        self.enable_dark_mode = enable_dark_mode
-        
-        # Data management
-        self.all_cards: List[Dict] = []
-        self.filtered_cards: List[Dict] = []
-        self.selected_cards: set = set()
-        self.is_loading = False
-        self.sort_column = "Card UID"
-        self.sort_reverse = False
-        
-        # UI setup
-        self.dialog = tk.Toplevel(parent)
-        self.dialog.title("📇 Card Manager - Modern Database View")
-        self.dialog.geometry("1100x700")
-        self.dialog.minsize(900, 600)
-        self.dialog.transient(parent)
-        
-        # Apply modern theme
-        self._setup_theme()
-        self._create_widgets()
-        self._load_cards_async()
-        
-        self.dialog.lift()
-        self.dialog.focus_force()
+    # Arabic translations
+    TRANSLATIONS = {
+        "Daily Report": "تقرير يومي", "Weekly Report": "تقرير أسبوعي", "Monthly Report": "تقرير شهري", "Custom Report": "تقرير مخصص", "Selected Cards Report": "تقرير البطاقات المختارة",
+        "Period": "الفترة الزمنية", "Key Metrics": "المقاييس الرئيسية", "Transactions": "المعاملات", "Analytics": "التحليلات", "Card Information": "معلومات البطاقة", "Transaction History": "سجل المعاملات",
+        "ID": "الرقم", "Card UID": "معرف البطاقة", "Type": "النوع", "Amount (EGP)": "المبلغ (جنيه)", "Balance (EGP)": "الرصيد (جنيه)", "Balance After (EGP)": "الرصيد بعد (جنيه)", "Employee": "الموظف", 
+        "Timestamp": "التاريخ والوقت", "Created": "تاريخ الإنشاء", "Last Top-up": "آخر شحن", "Notes": "ملاحظات", "Transaction Count": "عدد المعاملات", "Metric": "المقياس", "Value": "القيمة", 
+        "Total Transactions": "إجمالي المعاملات", "Total Cards": "إجمالي البطاقات", "Aggregate Balance": "إجمالي الرصيد", "Top-ups": "الشحنات", "Reads": "القراءات", "Total Amount": "الإجمالي", 
+        "Average Transaction": "متوسط المعاملة", "TOP-UP": "شحن", "READ": "قراءة", "TOPUP": "شحن", "Generated on": "تم إنشاؤه في", "Page": "الصفحة", "TOTAL": "الإجمالي", "N/A": "غير متاح", 
+        "No transactions available for this card.": "لا توجد معاملات متاحة لهذه البطاقة.", "Generated Date": "تاريخ الإنشاء", "Transaction Types Distribution": "توزيع أنواع المعاملات", 
+        "Daily Top-up Amounts": "مبالغ الشحن اليومية", "Date": "التاريخ"
+    }
     
-    def _setup_theme(self) -> None:
-        """Setup modern theme with colors and fonts."""
-        self.style = ttk.Style()
-        
-        # Try modern theme
+    @classmethod
+    def translate(cls, text: str, use_arabic: bool = True) -> str:
+        if not use_arabic: return text
+        return cls.TRANSLATIONS.get(text, text)
+    
+    @classmethod
+    def to_arabic_numerals(cls, number: int) -> str:
+        western = str(number); arabic = ""
+        for char in western:
+            if char.isdigit(): arabic += cls.ARABIC_NUMERALS[int(char)]
+            else: arabic += char
+        return arabic
+    
+    @classmethod
+    def format_date_arabic(cls, dt: Optional[datetime]) -> str:
+        if not dt: return cls.translate("N/A")
         try:
-            self.style.theme_use('clam')
-        except:
-            self.style.theme_use('default')
-        
-        # Define custom colors
-        bg = self.DARK_BG if self.enable_dark_mode else self.NEUTRAL_BG
-        fg = self.LIGHT_TEXT if self.enable_dark_mode else self.DARK_TEXT
-        
-        # Configure styles
-        self.style.configure('TLabel', background=bg, foreground=fg)
-        self.style.configure('TFrame', background=bg)
-        self.style.configure('Header.TLabel', font=('Segoe UI', 16, 'bold'), 
-                            background=bg, foreground=fg)
-        self.style.configure('Subheader.TLabel', font=('Segoe UI', 11, 'bold'),
-                            background=bg, foreground=self.PRIMARY_COLOR)
-        self.style.configure('Info.TLabel', font=('Segoe UI', 9),
-                            background=bg, foreground='#666666')
-        
-        # Button styles
-        self.style.configure('Primary.TButton', font=('Segoe UI', 10))
-        self.style.configure('Accent.TButton', font=('Segoe UI', 10, 'bold'))
-        
-        self.dialog.configure(bg=bg)
+            year = cls.to_arabic_numerals(dt.year); month = cls.to_arabic_numerals(dt.month); day = cls.to_arabic_numerals(dt.day)
+            hour = cls.to_arabic_numerals(dt.hour); minute = cls.to_arabic_numerals(dt.minute); second = cls.to_arabic_numerals(dt.second)
+            return f"{year}-{month}-{day} {hour}:{minute}:{second}"
+        except Exception as e:
+            logger.warning(f"Error formatting date in Arabic: {e}")
+            return dt.strftime('%Y-%m-%d %H:%M:%S')
     
-    def _create_widgets(self) -> None:
-        """Create and layout all dialog widgets."""
-        main_frame = ttk.Frame(self.dialog, padding="0")
-        main_frame.pack(fill=tk.BOTH, expand=True)
-        
-        # Header section
-        self._create_header(main_frame)
-        
-        # Filter & search section
-        self._create_filter_section(main_frame)
-        
-        # Main content area
-        self._create_content_area(main_frame)
-        
-        # Footer section
-        self._create_footer(main_frame)
+    @classmethod
+    def format_currency_arabic(cls, amount: float) -> str:
+        try:
+            formatted = f"{amount:,.2f}"; arabic = ""
+            for char in formatted:
+                if char.isdigit(): arabic += cls.ARABIC_NUMERALS[int(char)]
+                else: arabic += char
+            return arabic
+        except Exception as e:
+            logger.warning(f"Error formatting currency: {e}")
+            return f"{amount:,.2f}"
+            
+    @classmethod
+    def process_arabic_text(cls, text: str) -> str:
+        """Apply BiDi algorithm for correct RTL rendering."""
+        if HAS_BIDI:
+            return get_display(text)
+        return text
+
+
+class ModernPDFHeaderFooter(PageTemplate):
+    """Modern PDF header and footer with branding."""
     
-    def _create_header(self, parent: ttk.Frame) -> None:
-        """Create header with title and summary."""
-        header_frame = ttk.Frame(parent, padding="20")
-        header_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        left_frame = ttk.Frame(header_frame)
-        left_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        
-        title_label = ttk.Label(
-            left_frame,
-            text="📇 Card Management System",
-            style='Header.TLabel'
+    def __init__(self, company_name: str = "Card Management System", 
+                 use_arabic: bool = False, *args, **kwargs):
+        frame = Frame(
+            0.8 * inch, 0.8 * inch, 
+            A4[0] - 1.6 * inch, A4[1] - 1.6 * inch, 
+            id='normal'
         )
-        title_label.pack(anchor=tk.W)
-        
-        # Summary stats
-        self.summary_var = tk.StringVar(value="Loading data...")
-        summary_label = ttk.Label(
-            left_frame,
-            textvariable=self.summary_var,
-            style='Info.TLabel'
-        )
-        summary_label.pack(anchor=tk.W, pady=(5, 0))
-        
-        # Right side - loading indicator
-        self.loading_var = tk.StringVar(value="")
-        loading_label = ttk.Label(
-            header_frame,
-            textvariable=self.loading_var,
-            style='Info.TLabel'
-        )
-        loading_label.pack(side=tk.RIGHT)
+        super().__init__(frames=[frame], *args, **kwargs)
+        self.company_name = company_name
+        self.use_arabic = use_arabic
+        self.primary_color = HexColor("#2E86AB")
+        self.secondary_color = HexColor("#A23B72")
+        self.accent_color = HexColor("#06A77D")
+        self.arabic_font = ARABIC_REPORTLAB_FONT
     
-    def _create_filter_section(self, parent: ttk.Frame) -> None:
-        """Create advanced filter and search section."""
-        filter_frame = ttk.LabelFrame(
-            parent,
-            text=" 🔍 Search & Advanced Filters",
-            padding="15"
-        )
-        filter_frame.pack(fill=tk.X, padx=15, pady=(0, 15))
+    def before_page(self, canvas_obj, doc):
+        """Draw modern header."""
+        canvas_obj.saveState()
+        width, height = letter if not hasattr(doc, '_pagesize') else doc._pagesize
         
-        # Search row
-        search_row = ttk.Frame(filter_frame)
-        search_row.pack(fill=tk.X, pady=(0, 12))
+        # Decorative line
+        canvas_obj.setStrokeColor(self.primary_color); canvas_obj.setLineWidth(3)
+        canvas_obj.line(0.5 * inch, height - 0.6 * inch, width - 0.5 * inch, height - 0.6 * inch)
         
-        ttk.Label(search_row, text="Search by UID:").pack(side=tk.LEFT, padx=5)
+        # Company name
+        font_name = self.arabic_font if self.use_arabic else "Helvetica-Bold"
+        canvas_obj.setFont(font_name, 11); canvas_obj.setFillColor(self.primary_color)
+        company_text = ArabicTextHelper.process_arabic_text(self.company_name) if self.use_arabic else self.company_name
         
-        self.search_var = tk.StringVar()
-        self.search_var.trace('w', lambda *args: self._filter_cards())
+        if self.use_arabic:
+             canvas_obj.drawRightString(width - 0.5 * inch, height - 0.35 * inch, company_text)
+        else:
+             canvas_obj.drawString(0.5 * inch, height - 0.35 * inch, company_text)
         
-        search_entry = ttk.Entry(
-            search_row,
-            textvariable=self.search_var,
-            font=('Segoe UI', 10),
-            width=30
-        )
-        search_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        # Generation date and time
+        canvas_obj.setFont(self.arabic_font if self.use_arabic else "Helvetica", 8)
+        canvas_obj.setFillColor(HexColor("#666666"))
+        date_raw = datetime.now()
+        date_text = ArabicTextHelper.format_date_arabic(date_raw) if self.use_arabic else date_raw.strftime("%Y-%m-%d %H:%M:%S")
+        date_text_proc = ArabicTextHelper.process_arabic_text(date_text)
         
-        # Filter options row
-        filter_options_row = ttk.Frame(filter_frame)
-        filter_options_row.pack(fill=tk.X)
+        if self.use_arabic:
+            canvas_obj.drawString(0.5 * inch, height - 0.35 * inch, date_text_proc)
+        else:
+            canvas_obj.drawRightString(width - 0.5 * inch, height - 0.35 * inch, date_text_proc)
         
-        # Min balance filter
-        ttk.Label(filter_options_row, text="Min Balance (EGP):").pack(side=tk.LEFT, padx=5)
-        self.min_balance_var = tk.DoubleVar(value=0)
-        self.min_balance_var.trace('w', lambda *args: self._filter_cards())
-        
-        min_balance_spin = ttk.Spinbox(
-            filter_options_row,
-            from_=0,
-            to=1000000,
-            textvariable=self.min_balance_var,
-            width=12,
-            font=('Segoe UI', 10)
-        )
-        min_balance_spin.pack(side=tk.LEFT, padx=5)
-        
-        # Max balance filter
-        ttk.Label(filter_options_row, text="Max Balance (EGP):").pack(side=tk.LEFT, padx=5)
-        self.max_balance_var = tk.DoubleVar(value=1000000)
-        self.max_balance_var.trace('w', lambda *args: self._filter_cards())
-        
-        max_balance_spin = ttk.Spinbox(
-            filter_options_row,
-            from_=0,
-            to=1000000,
-            textvariable=self.max_balance_var,
-            width=12,
-            font=('Segoe UI', 10)
-        )
-        max_balance_spin.pack(side=tk.LEFT, padx=5)
-        
-        # Action buttons
-        button_frame = ttk.Frame(filter_frame)
-        button_frame.pack(fill=tk.X, pady=(12, 0))
-        
-        ttk.Button(
-            button_frame,
-            text=f"{self.ICON_SEARCH} Search",
-            command=self._filter_cards,
-            width=15
-        ).pack(side=tk.LEFT, padx=3)
-        
-        ttk.Button(
-            button_frame,
-            text="Clear Filters",
-            command=self._clear_filters,
-            width=15
-        ).pack(side=tk.LEFT, padx=3)
-        
-        ttk.Button(
-            button_frame,
-            text=f"{self.ICON_REFRESH} Refresh",
-            command=self._load_cards_async,
-            width=15
-        ).pack(side=tk.LEFT, padx=3)
+        canvas_obj.restoreState()
     
-    def _create_content_area(self, parent: ttk.Frame) -> None:
-        """Create main content area with table."""
-        content_frame = ttk.Frame(parent, padding="15")
-        content_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
+    def after_page(self, canvas_obj, doc):
+        """Draw modern footer."""
+        canvas_obj.saveState()
+        width, height = letter if not hasattr(doc, '_pagesize') else doc._pagesize
         
-        # Table frame with scrollbars
-        table_frame = ttk.Frame(content_frame)
-        table_frame.pack(fill=tk.BOTH, expand=True)
+        # Footer line
+        canvas_obj.setStrokeColor(HexColor("#E0E0E0")); canvas_obj.setLineWidth(0.5)
+        canvas_obj.line(0.5 * inch, 0.6 * inch, width - 0.5 * inch, 0.6 * inch)
         
-        # Scrollbars
-        vsb = ttk.Scrollbar(table_frame, orient=tk.VERTICAL)
-        hsb = ttk.Scrollbar(table_frame, orient=tk.HORIZONTAL)
+        # Page number
+        canvas_obj.setFont(self.arabic_font if self.use_arabic else "Helvetica", 8)
+        canvas_obj.setFillColor(HexColor("#999999"))
+        page_label = ArabicTextHelper.translate("Page", self.use_arabic)
+        page_num_str = ArabicTextHelper.to_arabic_numerals(doc.page) if self.use_arabic else str(doc.page)
+        page_text = f"{page_label} {page_num_str}"
+        page_text_proc = ArabicTextHelper.process_arabic_text(page_text)
         
-        # Treeview with modern styling
-        self.tree = ttk.Treeview(
-            table_frame,
-            columns=('UID', 'Balance', 'Created', 'Last Top-up', 'Employee', 'Transactions'),
-            show='headings',
-            yscrollcommand=vsb.set,
-            xscrollcommand=hsb.set,
-            height=15,
-            selectmode='extended'
-        )
+        canvas_obj.drawRightString(width - 0.5 * inch, 0.35 * inch, page_text_proc)
         
-        vsb.config(command=self.tree.yview)
-        hsb.config(command=self.tree.xview)
-        
-        # Configure columns with icons
-        self.tree.heading('UID', text=f'💳 Card UID', command=lambda: self._sort_column('UID'))
-        self.tree.heading('Balance', text=f'💰 Balance (EGP)', command=lambda: self._sort_column('Balance'))
-        self.tree.heading('Created', text=f'📅 Created At', command=lambda: self._sort_column('Created'))
-        self.tree.heading('Last Top-up', text=f'⬆️ Last Top-up', command=lambda: self._sort_column('Last Top-up'))
-        self.tree.heading('Employee', text=f'👤 Last Employee', command=lambda: self._sort_column('Employee'))
-        self.tree.heading('Transactions', text=f'📝 Transactions', command=lambda: self._sort_column('Transactions'))
-        
-        self.tree.column('UID', width=250, anchor=tk.W)
-        self.tree.column('Balance', width=140, anchor=tk.E)
-        self.tree.column('Created', width=160, anchor=tk.CENTER)
-        self.tree.column('Last Top-up', width=160, anchor=tk.CENTER)
-        self.tree.column('Employee', width=120, anchor=tk.W)
-        self.tree.column('Transactions', width=120, anchor=tk.CENTER)
-        
-        # Alternating row colors
-        style = ttk.Style()
-        style.configure("Treeview", rowheight=28, font=('Segoe UI', 10))
-        style.map('Treeview', background=[('selected', self.PRIMARY_COLOR)])
-        
-        # Bind events
-        self.tree.bind('<Double-1>', lambda e: self._show_card_details())
-        self.tree.bind('<Delete>', lambda e: self._delete_selected_cards())
-        
-        # Grid layout
-        self.tree.grid(row=0, column=0, sticky='nsew')
-        vsb.grid(row=0, column=1, sticky='ns')
-        hsb.grid(row=1, column=0, sticky='ew')
-        
-        table_frame.grid_rowconfigure(0, weight=1)
-        table_frame.grid_columnconfigure(0, weight=1)
+        canvas_obj.restoreState()
+
+
+class ModernChartGenerator:
+    """Generate modern, professional charts for PDF reports."""
     
-    def _create_footer(self, parent: ttk.Frame) -> None:
-        """Create footer with action buttons."""
-        footer_frame = ttk.Frame(parent, padding="15")
-        footer_frame.pack(fill=tk.X)
-        
-        # Left side buttons
-        left_buttons = ttk.Frame(footer_frame)
-        left_buttons.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        
-        ttk.Button(
-            left_buttons,
-            text=f"{self.ICON_DETAILS} View Details",
-            command=self._show_card_details,
-            width=18
-        ).pack(side=tk.LEFT, padx=3)
-        
-        ttk.Button(
-            left_buttons,
-            text=f"{self.ICON_EXPORT} Export to CSV",
-            command=self._export_to_csv,
-            width=18
-        ).pack(side=tk.LEFT, padx=3)
-        
-        ttk.Button(
-            left_buttons,
-            text=f"{self.ICON_DELETE} Delete Selected",
-            command=self._delete_selected_cards,
-            width=18
-        ).pack(side=tk.LEFT, padx=3)
-        
-        # Right side buttons
-        right_buttons = ttk.Frame(footer_frame)
-        right_buttons.pack(side=tk.RIGHT)
-        
-        ttk.Button(
-            right_buttons,
-            text="✕ Close",
-            command=self.dialog.destroy,
-            width=15
-        ).pack(side=tk.LEFT, padx=3)
+    COLORS = {
+        'topup': '#06A77D', 'read': '#2E86AB', 'accent': '#A23B72', 'warning': '#F18F01',
+        'danger': '#C1121F', 'light': '#F5F5F5', 'dark': '#2C3E50'
+    }
     
-    def _load_cards_async(self) -> None:
-        """Load cards asynchronously to prevent UI freezing."""
-        self.is_loading = True
-        self.loading_var.set("⏳ Loading...")
+    @staticmethod
+    def generate_transaction_pie_chart(transactions: List[Dict], 
+                                       width: int = 4, height: int = 4,
+                                       use_arabic: bool = False) -> Optional[BytesIO]:
+        """Generate modern pie chart of transaction types."""
+        if not HAS_MATPLOTLIB: return None
+        topup_count = sum(1 for t in transactions if t['type'] == 'topup')
+        read_count = sum(1 for t in transactions if t['type'] == 'read')
+        if topup_count == 0 and read_count == 0: return None
         
-        def load_task():
-            try:
-                self.all_cards = self.db_service.get_all_cards()
-                self.dialog.after(0, self._on_cards_loaded)
-            except Exception as e:
-                logger.error(f"Error loading cards: {e}")
-                self.dialog.after(0, lambda: self._show_error("Failed to load cards", str(e)))
+        fig, ax = plt.subplots(figsize=(width, height), facecolor='white')
+        sizes = [topup_count, read_count]
+        label_topup = ArabicTextHelper.process_arabic_text(f'{ArabicTextHelper.translate("TOP-UP", use_arabic)}\n({ArabicTextHelper.to_arabic_numerals(topup_count) if use_arabic else topup_count})')
+        label_read = ArabicTextHelper.process_arabic_text(f'{ArabicTextHelper.translate("READ", use_arabic)}\n({ArabicTextHelper.to_arabic_numerals(read_count) if use_arabic else read_count})')
+        labels = [label_topup, label_read]
         
-        thread = Thread(target=load_task, daemon=True)
-        thread.start()
+        colors_pie = [ModernChartGenerator.COLORS['topup'], ModernChartGenerator.COLORS['read']]
+        text_props = {'fontsize': 11, 'weight': 'bold', 'family': 'sans-serif'}
+        
+        ax.pie(sizes, labels=labels, colors=colors_pie, autopct='%1.1f%%', startangle=90,
+            textprops=text_props, explode=(0.05, 0.05), shadow=True)
+        
+        title_raw = ArabicTextHelper.translate("Transaction Types Distribution", use_arabic)
+        title_proc = ArabicTextHelper.process_arabic_text(title_raw) if use_arabic else title_raw
+        ax.set_title(title_proc, fontsize=13, weight='bold', pad=20, color=ModernChartGenerator.COLORS['dark'])
+        
+        img_buffer = BytesIO()
+        plt.savefig(img_buffer, format='png', dpi=150, bbox_inches='tight', facecolor='white', edgecolor='none')
+        img_buffer.seek(0); plt.close(fig)
+        return img_buffer
     
-    def _on_cards_loaded(self) -> None:
-        """Handle cards loaded event."""
-        self.is_loading = False
-        self.loading_var.set("")
-        self.filtered_cards = self.all_cards.copy()
-        self._update_display()
-        logger.info(f"Loaded {len(self.all_cards)} cards from database")
-    
-    def _filter_cards(self) -> None:
-        """Filter cards based on search and range inputs."""
-        search_text = self.search_var.get().lower().strip()
-        min_balance = self.min_balance_var.get()
-        max_balance = self.max_balance_var.get()
+    @staticmethod
+    def generate_daily_amount_chart(transactions: List[Dict], 
+                                    width: int = 7, height: int = 4,
+                                    use_arabic: bool = False) -> Optional[BytesIO]:
+        """Generate modern bar chart of daily amounts."""
+        if not HAS_MATPLOTLIB: return None
+        daily_data = {};
+        for t in transactions:
+            date = t['timestamp'].date()
+            if date not in daily_data: daily_data[date] = 0
+            if t['type'] == 'topup': daily_data[date] += t['amount']
+        if not daily_data: return None
         
-        self.filtered_cards = [
-            card for card in self.all_cards
-            if (not search_text or search_text in card['card_uid'].lower()) and
-               (min_balance <= card['balance'] <= max_balance)
+        dates = sorted(daily_data.keys()); amounts = [daily_data[d] for d in dates]
+        fig, ax = plt.subplots(figsize=(width, height), facecolor='white')
+        
+        bars = ax.bar(range(len(dates)), amounts, color=ModernChartGenerator.COLORS['topup'], 
+                     edgecolor=ModernChartGenerator.COLORS['dark'], linewidth=1.5, alpha=0.85)
+        
+        xlabel_proc = ArabicTextHelper.process_arabic_text(ArabicTextHelper.translate("Date", use_arabic))
+        ylabel_proc = ArabicTextHelper.process_arabic_text(ArabicTextHelper.translate("Amount (EGP)", use_arabic))
+        title_proc = ArabicTextHelper.process_arabic_text(ArabicTextHelper.translate("Daily Top-up Amounts", use_arabic))
+        
+        font_config = {'fontname': 'sans-serif'}
+        
+        ax.set_xlabel(xlabel_proc, fontsize=11, weight='bold', color=ModernChartGenerator.COLORS['dark'], **font_config)
+        ax.set_ylabel(ylabel_proc, fontsize=11, weight='bold', color=ModernChartGenerator.COLORS['dark'], **font_config)
+        ax.set_title(title_proc, fontsize=13, weight='bold', pad=20, color=ModernReportsGenerator.DARK_TEXT, **font_config)
+        ax.set_xticks(range(len(dates))); ax.set_xticklabels([d.strftime('%m-%d') for d in dates], rotation=45, fontsize=9)
+        
+        img_buffer = BytesIO()
+        plt.savefig(img_buffer, format='png', dpi=150, bbox_inches='tight', facecolor='white', edgecolor='none')
+        img_buffer.seek(0); plt.close(fig)
+        return img_buffer
+
+
+class ModernReportsGenerator:
+    """Generate modern, professional PDF reports with Arabic support."""
+    
+    PRIMARY_COLOR = HexColor("#2E86AB"); SECONDARY_COLOR = HexColor("#A23B72"); SUCCESS_COLOR = HexColor("#06A77D")
+    WARNING_COLOR = HexColor("#F18F01"); DANGER_COLOR = HexColor("#C1121F"); LIGHT_BG = HexColor("#F5F5F5")
+    LIGHT_GRAY = HexColor("#EEEEEE"); DARK_TEXT = HexColor("#2C3E50"); MEDIUM_TEXT = HexColor("#555555")
+    
+    def __init__(self, db_service, output_dir: str = 'reports', 
+                 company_name: str = "Card Management System",
+                 use_arabic: bool = False):
+        """Initialize reports generator."""
+        if use_arabic and not HAS_BIDI:
+            raise ImportError("Arabic support requires 'python-bidi' library.")
+        if use_arabic and ARABIC_REPORTLAB_FONT == "Helvetica":
+            logger.warning("Arabic font registration failed. PDF rendering may be incorrect.")
+        
+        self.db_service = db_service
+        self.output_dir = Path(output_dir); self.output_dir.mkdir(exist_ok=True)
+        self.company_name = company_name; self.use_arabic = use_arabic
+        self.chart_generator = ModernChartGenerator(); self.arabic_font = ARABIC_REPORTLAB_FONT 
+        
+    def _translate(self, text: str) -> str:
+        """Translate text if Arabic is enabled."""
+        return ArabicTextHelper.translate(text, self.use_arabic)
+        
+    def _bidi_process(self, text: str) -> str:
+        """Process Arabic text for RTL display if Arabic is enabled."""
+        if self.use_arabic:
+            return ArabicTextHelper.process_arabic_text(text)
+        return text
+
+    def _calculate_statistics(self, transactions: List[Dict]) -> Dict:
+        """Calculate report statistics."""
+        topup_transactions = [t for t in transactions if t['type'] == 'topup']
+        total_topup_amount = sum(t['amount'] for t in topup_transactions)
+        total_read_amount = sum(t['amount'] for t in [t for t in transactions if t['type'] == 'read'])
+        
+        return {
+            'total_transactions': len(transactions),
+            'topup_count': len(topup_transactions),
+            'read_count': len([t for t in transactions if t['type'] == 'read']),
+            'total_topup_amount': total_topup_amount,
+            'total_read_amount': total_read_amount,
+            'total_amount': total_topup_amount + total_read_amount,
+            'avg_transaction': (total_topup_amount + total_read_amount) / len(transactions) if transactions else 0
+        }
+    
+    def _create_modern_cover_page(self, report_title: str, period: str, stats: Dict) -> List:
+        """Create modern cover page elements."""
+        elements = []; styles = getSampleStyleSheet()
+        
+        font_name = self.arabic_font; font_name_bold = f"{font_name}-Bold"
+        text_align = TA_RIGHT if self.use_arabic else TA_CENTER
+        
+        title_style = ParagraphStyle('ModernTitle', parent=styles['Heading1'], fontSize=42, textColor=self.PRIMARY_COLOR, alignment=text_align, fontName=font_name_bold, leading=50)
+        subtitle_style = ParagraphStyle('ModernSubtitle', parent=styles['Normal'], fontSize=18, textColor=self.DARK_TEXT, alignment=text_align, fontName=font_name_bold)
+        meta_style = ParagraphStyle('Meta', parent=styles['Normal'], fontSize=10, textColor=self.MEDIUM_TEXT, alignment=text_align, fontName=font_name)
+        
+        elements.append(Spacer(1, 1.2 * inch))
+        elements.append(Paragraph(self._bidi_process(self.company_name), subtitle_style)); elements.append(Spacer(1, 0.2 * inch))
+        
+        elements.append(Paragraph(self._bidi_process(self._translate(report_title)), title_style)); elements.append(Spacer(1, 0.15 * inch))
+        
+        period_label = self._bidi_process(self._translate('Period'))
+        elements.append(Paragraph(f"<font color='{self.MEDIUM_TEXT.hexval()}' fontName='{font_name_bold}'>{period_label}:</font> <font fontName='{font_name}'>{self._bidi_process(period)}</font>", meta_style))
+        elements.append(Spacer(1, 0.3 * inch))
+        
+        elements.append(Paragraph(self._bidi_process(self._translate("Key Metrics")), subtitle_style)); elements.append(Spacer(1, 0.15 * inch))
+        
+        total_amount_str = f"EGP {ArabicTextHelper.format_currency_arabic(stats['total_amount'])}" if self.use_arabic else f"EGP {stats['total_amount']:.2f}"
+        avg_transaction_str = f"EGP {ArabicTextHelper.format_currency_arabic(stats['avg_transaction'])}" if self.use_arabic else f"EGP {stats['avg_transaction']:.2f}"
+                               
+        stats_data = [
+            [self._bidi_process(self._translate('Metric')), self._bidi_process(self._translate('Value'))],
+            [self._bidi_process(self._translate('Total Transactions')), self._bidi_process(ArabicTextHelper.to_arabic_numerals(stats['total_transactions']) if self.use_arabic else str(stats['total_transactions']))],
+            [self._bidi_process(self._translate('Top-ups')), self._bidi_process(f"{ArabicTextHelper.to_arabic_numerals(stats['topup_count']) if self.use_arabic else stats['topup_count']} (EGP {stats['total_topup_amount']:.2f})")],
+            [self._bidi_process(self._translate('Reads')), self._bidi_process(f"{ArabicTextHelper.to_arabic_numerals(stats['read_count']) if self.use_arabic else stats['read_count']} (EGP {stats['total_read_amount']:.2f})")],
+            [self._bidi_process(self._translate('Total Amount')), self._bidi_process(total_amount_str)],
+            [self._bidi_process(self._translate('Average Transaction')), self._bidi_process(avg_transaction_str)]
         ]
         
-        self._update_display()
-    
-    def _sort_column(self, column: str) -> None:
-        """Sort table by column."""
-        if self.sort_column == column:
-            self.sort_reverse = not self.sort_reverse
+        if self.use_arabic:
+            stats_data = [row[::-1] for row in stats_data]; col_align_left = 'RIGHT'; col_align_right = 'LEFT'
         else:
-            self.sort_column = column
-            self.sort_reverse = False
+            col_align_left = 'LEFT'; col_align_right = 'RIGHT'
         
-        # Sort logic
-        if column == 'UID':
-            key = lambda x: x['card_uid']
-        elif column == 'Balance':
-            key = lambda x: x['balance']
-        elif column == 'Created':
-            key = lambda x: x['created_at'] or datetime.min
-        elif column == 'Last Top-up':
-            key = lambda x: x['last_topped_at'] or datetime.min
-        elif column == 'Employee':
-            # For sorting, get the last employee for each card
-            def get_employee(card):
-                try:
-                    transactions = self.db_service.get_transactions(card_uid=card['card_uid'])
-                    return transactions[0]['employee'] if transactions else ''
-                except:
-                    return ''
-            key = get_employee
-        elif column == 'Transactions':
-            def get_tx_count(card):
-                try:
-                    return len(self.db_service.get_transactions(card_uid=card['card_uid']))
-                except:
-                    return 0
-            key = get_tx_count
+        stats_table = Table(stats_data, colWidths=[3 * inch, 2.5 * inch])
+        stats_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), self.PRIMARY_COLOR), ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'), ('FONTNAME', (0, 0), (-1, 0), font_name_bold), ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), self.LIGHT_BG), ('TEXTCOLOR', (0, 1), (-1, -1), self.DARK_TEXT),
+            ('ALIGN', (0, 1), (0, -1), col_align_left), ('ALIGN', (1, 1), (1, -1), col_align_right),
+            ('FONTNAME', (0, 1), (-1, -1), font_name), ('FONTSIZE', (0, 1), (-1, -1), 10),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, self.LIGHT_GRAY]),
+            ('GRID', (0, 0), (-1, -1), 1, HexColor("#DDDDDD")),
+        ]))
+        
+        elements.append(stats_table); elements.append(Spacer(1, 0.4 * inch))
+        
+        gen_date = ArabicTextHelper.format_date_arabic(datetime.now()) if self.use_arabic else datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        gen_text = self._bidi_process(f"{self._translate('Generated on')} {gen_date}")
+        elements.append(Paragraph(f"<font color='#999999' size=8 fontName='{font_name}'>{gen_text}</font>", meta_style))
+        
+        return elements
+    
+    def _create_modern_transactions_table(self, transactions: List[Dict]) -> Table:
+        """Create modern formatted transactions table."""
+        
+        font_name = self.arabic_font; font_name_bold = f"{font_name}-Bold"
+        
+        table_data_raw = [
+            [self._translate('ID'), self._translate('Card UID'), self._translate('Type'), self._translate('Amount (EGP)'),
+             self._translate('Balance After (EGP)'), self._translate('Employee'), self._translate('Timestamp'), self._translate('Notes')]
+        ]
+        
+        for i, t in enumerate(transactions):
+            tx_type = self._translate('TOP-UP') if t['type'] == 'topup' else self._translate('READ')
+            amount = ArabicTextHelper.format_currency_arabic(t['amount']) if self.use_arabic else f"{t['amount']:.2f}"
+            balance = ArabicTextHelper.format_currency_arabic(t['balance_after']) if self.use_arabic else f"{t['balance_after']:.2f}"
+            
+            row = [
+                self._bidi_process(str(t.get('id', ''))),
+                self._bidi_process(t['card_uid'][:12] + '...' if len(t['card_uid']) > 12 else t['card_uid']),
+                self._bidi_process(tx_type),
+                self._bidi_process(amount),
+                self._bidi_process(balance),
+                self._bidi_process(t.get('employee', 'N/A')[:15]),
+                self._bidi_process(ArabicTextHelper.format_date_arabic(t['timestamp']) if self.use_arabic else t['timestamp'].strftime('%Y-%m-%d %H:%M')),
+                self._bidi_process((t.get('notes', 'N/A') or self._translate('N/A'))[:20])
+            ]
+            table_data_raw.append(row)
+        
+        # Add total row
+        total_amount = sum(t['amount'] for t in transactions if t['type'] == 'topup')
+        total_formatted = ArabicTextHelper.format_currency_arabic(total_amount) if self.use_arabic else f"{total_amount:.2f}"
+        total_row = ['', '', f"<b>{self._bidi_process(self._translate('TOTAL'))}</b>", f"<b>{self._bidi_process(total_formatted)}</b>", '', '', '', '']
+        table_data_raw.append(total_row)
+        
+        # Reverse columns for RTL display of table data
+        if self.use_arabic:
+            table_data = [row[::-1] for row in table_data_raw]
+            header_align = 'RIGHT'; content_align_left = 'RIGHT'; content_align_right = 'LEFT'
+            total_text_col = 5; total_value_col = 4
         else:
-            return
+            table_data = table_data_raw
+            header_align = 'CENTER'; content_align_left = 'LEFT'; content_align_right = 'RIGHT'
+            total_text_col = 2; total_value_col = 3
         
-        self.filtered_cards.sort(key=key, reverse=self.sort_reverse)
-        self._update_display()
+        col_widths = [0.5*inch, 1.2*inch, 0.8*inch, 1*inch, 1*inch, 1*inch, 1.2*inch, 1.3*inch]
+        table = Table(table_data, colWidths=col_widths)
+        
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), self.PRIMARY_COLOR), ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, 0), header_align), ('FONTNAME', (0, 0), (-1, 0), font_name_bold), ('FONTSIZE', (0, 0), (-1, 0), 9),
+            ('ALIGN', (0, 1), (-1, -2), content_align_left), ('ALIGN', (3, 1), (4, -2), content_align_right),
+            ('FONTSIZE', (0, 1), (-1, -2), 8), ('FONTNAME', (0, 1), (-1, -2), font_name),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -2), [colors.white, self.LIGHT_BG]),
+            ('BACKGROUND', (0, -1), (-1, -1), self.SUCCESS_COLOR), ('TEXTCOLOR', (0, -1), (-1, -1), colors.whitesmoke),
+            ('FONTNAME', (0, -1), (-1, -1), font_name_bold),
+            ('ALIGN', (total_text_col, -1), (total_text_col, -1), 'RIGHT'), ('ALIGN', (total_value_col, -1), (total_value_col, -1), 'RIGHT'),
+            ('GRID', (0, 0), (-1, -1), 0.5, HexColor("#E0E0E0")),
+        ]))
+        
+        return table
     
-    def _update_display(self) -> None:
-        """Update the treeview with filtered and sorted cards."""
-        # Clear existing items
-        for item in self.tree.get_children():
-            self.tree.delete(item)
-        
-        # Add filtered cards
-        for idx, card in enumerate(self.filtered_cards):
-            created_date = card['created_at'].strftime('%Y-%m-%d %H:%M:%S') if card['created_at'] else 'N/A'
-            last_topup = card['last_topped_at'].strftime('%Y-%m-%d %H:%M:%S') if card['last_topped_at'] else 'Never'
-            
-            # Get transaction count and last employee
-            try:
-                transactions = self.db_service.get_transactions(card_uid=card['card_uid'])
-                tx_count = len(transactions)
-                last_employee = transactions[0]['employee'] if transactions else 'N/A'
-            except:
-                tx_count = 0
-                last_employee = 'N/A'
-            
-            # Alternate row colors
-            tag = 'oddrow' if idx % 2 == 0 else 'evenrow'
-            
-            self.tree.insert('', tk.END, values=(
-                card['card_uid'],
-                f"{card['balance']:.2f}",
-                created_date,
-                last_topup,
-                last_employee,
-                tx_count
-            ), tags=(tag,))
-        
-        # Configure row colors
-        style = ttk.Style()
-        style.configure('oddrow', background=self.NEUTRAL_BG)
-        style.configure('evenrow', background='#FFFFFF')
-        
-        self._update_summary()
+    def _get_report_filename(self, report_type: str, extension: str = 'pdf', 
+                            identifier: str = '') -> Path:
+        """Generate report filename with timestamp."""
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"{report_type}_report_{identifier}_{timestamp}.{extension}"
+        return self.output_dir / filename
     
-    def _update_summary(self) -> None:
-        """Update summary statistics."""
-        total_balance = sum(card['balance'] for card in self.filtered_cards)
-        total_cards = len(self.filtered_cards)
-        all_cards_count = len(self.all_cards)
+    def _generate_pdf(self, filename: str, elements: List, 
+                     landscape_mode: bool = False) -> str:
+        """Generate modern PDF document."""
+        if not HAS_REPORTLAB:
+            raise ImportError("reportlab is required for PDF generation.")
         
-        if self.search_var.get().strip() or self.min_balance_var.get() > 0 or self.max_balance_var.get() < 1000000:
-            summary = f"📊 Showing {total_cards} of {all_cards_count} cards | 💰 Total Balance: {total_balance:,.2f} EGP"
-        else:
-            summary = f"📊 Total: {total_cards} cards | 💰 Total Balance: {total_balance:,.2f} EGP"
+        filepath = self.output_dir / filename
         
-        self.summary_var.set(summary)
-    
-    def _clear_filters(self) -> None:
-        """Clear all filters."""
-        self.search_var.set("")
-        self.min_balance_var.set(0)
-        self.max_balance_var.set(1000000)
-        self._filter_cards()
-    
-    def _export_to_csv(self) -> None:
-        """Export filtered cards to CSV file with progress."""
-        if not self.filtered_cards:
-            self._show_warning("No data to export")
-            return
-        
-        file_path = filedialog.asksaveasfilename(
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
-            initialfile=f"cards_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-        )
-        
-        if not file_path:
-            return
-        
-        self.is_loading = True
-        self.loading_var.set("⏳ Exporting...")
-        
-        def export_task():
-            try:
-                with open(file_path, 'w', newline='', encoding='utf-8') as f:
-                    writer = csv.writer(f)
-                    writer.writerow(["Card UID", "Balance (EGP)", "Created At", "Last Top-up", "Last Employee", "Transaction Count"])
-                    
-                    for card in self.filtered_cards:
-                        created_date = card['created_at'].strftime('%Y-%m-%d %H:%M:%S') if card['created_at'] else 'N/A'
-                        last_topup = card['last_topped_at'].strftime('%Y-%m-%d %H:%M:%S') if card['last_topped_at'] else 'Never'
-                        
-                        try:
-                            transactions = self.db_service.get_transactions(card_uid=card['card_uid'])
-                            tx_count = len(transactions)
-                            last_employee = transactions[0]['employee'] if transactions else 'N/A'
-                        except:
-                            tx_count = 0
-                            last_employee = 'N/A'
-                        
-                        writer.writerow([card['card_uid'], f"{card['balance']:.2f}", created_date, last_topup, last_employee, tx_count])
-                
-                self.dialog.after(0, lambda: self._show_success(f"Data exported successfully to:\n{file_path}"))
-                logger.info(f"Cards exported to {file_path}")
-            except Exception as e:
-                logger.error(f"Error exporting to CSV: {e}")
-                self.dialog.after(0, lambda: self._show_error("Export Failed", str(e)))
-            finally:
-                self.is_loading = False
-                self.dialog.after(0, lambda: self.loading_var.set(""))
-        
-        thread = Thread(target=export_task, daemon=True)
-        thread.start()
-    
-    def _delete_selected_cards(self) -> None:
-        """Delete selected cards after confirmation."""
-        selection = self.tree.selection()
-        if not selection:
-            self._show_warning("Please select cards to delete")
-            return
-        
-        if messagebox.askyesno("Confirm Deletion", f"Delete {len(selection)} card(s)? This cannot be undone!"):
-            self.is_loading = True
-            self.loading_var.set("⏳ Deleting...")
-            
-            def delete_task():
-                deleted_count = 0
-                for item in selection:
-                    try:
-                        values = self.tree.item(item)['values']
-                        card_uid = values[0]
-                        self.db_service.delete_card(card_uid)
-                        deleted_count += 1
-                    except Exception as e:
-                        logger.error(f"Error deleting card: {e}")
-                
-                self.dialog.after(0, self._load_cards_async)
-                self.dialog.after(0, lambda: self._show_success(f"Deleted {deleted_count} card(s) successfully"))
-            
-            thread = Thread(target=delete_task, daemon=True)
-            thread.start()
-    
-    def _show_error(self, title: str, message: str) -> None:
-        """Show modern error dialog."""
-        messagebox.showerror(title, message)
-    
-    def _show_warning(self, message: str) -> None:
-        """Show modern warning dialog."""
-        messagebox.showwarning("⚠️ Warning", message)
-    
-    def _show_success(self, message: str) -> None:
-        """Show modern success dialog."""
-        messagebox.showinfo("✓ Success", message)
-    
-    def _show_card_details(self) -> None:
-        """Show detailed information for selected card in a modern window."""
-        selection = self.tree.selection()
-        if not selection:
-            self._show_warning("Please select a card to view details")
-            return
-        
-        item = selection[0]
-        values = self.tree.item(item)['values']
-        
-        # Ensure card_uid is treated as a string
-        card_uid = str(values[0]) if values else ""
-        
-        logger.debug(f"Looking for card with UID: '{card_uid}'")
-        
-        # More robust card lookup with normalization
-        card = None
-        
-        # First try exact match
-        card = next((c for c in self.filtered_cards if str(c['card_uid']) == card_uid), None)
-        
-        # If not found, try case-insensitive match with whitespace stripped
-        if not card:
-            normalized_uid = str(card_uid).strip().lower()
-            card = next((c for c in self.filtered_cards 
-                        if str(c['card_uid']).strip().lower() == normalized_uid), None)
-        
-        # If still not found, try searching in all cards as fallback
-        if not card:
-            logger.debug("Card not found in filtered cards, trying all cards")
-            card = next((c for c in self.all_cards if str(c['card_uid']) == card_uid), None)
-            if not card:
-                normalized_uid = str(card_uid).strip().lower()
-                card = next((c for c in self.all_cards 
-                            if str(c['card_uid']).strip().lower() == normalized_uid), None)
-        
-        if not card:
-            logger.error(f"Card not found: '{card_uid}'")
-            available_uids = [str(c['card_uid']) for c in self.filtered_cards[:5]]
-            self._show_error(
-                "Card Not Found", 
-                f"Could not find card with UID: '{card_uid}'\n\n"
-                f"First few available cards: {available_uids}\n\n"
-                "This could be due to filtering or database synchronization issues."
-            )
-            return
-        
-        logger.info(f"Found card: {card['card_uid']} with balance: {card['balance']}")
-        
-        # Fetch transactions
         try:
-            transactions = self.db_service.get_transactions(card_uid=card['card_uid'])
+            pagesize = landscape(A4) if landscape_mode else A4
+            doc = SimpleDocTemplate(
+                str(filepath), pagesize=pagesize, rightMargin=0.5 * inch, leftMargin=0.5 * inch, 
+                topMargin=0.9 * inch, bottomMargin=0.9 * inch
+            )
+            
+            header_footer = ModernPDFHeaderFooter(
+                self.company_name, use_arabic=self.use_arabic, id='standard_template'
+            )
+            doc.addPageTemplates([header_footer])
+            
+            doc.build(elements)
+            logger.info(f"PDF report generated: {filepath}")
+            return str(filepath)
         except Exception as e:
-            logger.error(f"Error fetching transactions: {e}")
-            transactions = []
+            logger.error(f"Error generating PDF report: {e}")
+            raise
+
+    # --- PUBLIC REPORT GENERATION METHODS (PDF ONLY) ---
+
+    def generate_report(self, report_type: str, transactions: List[Dict], period: str, 
+                        identifier: str = '', landscape_mode: bool = False) -> str:
+        """A consolidated PDF generator for all standard report types."""
+        stats = self._calculate_statistics(transactions)
         
-        # Show the details window instead of exporting to a file
-        self._create_details_window(card, transactions)
-    
-    def _create_details_window(self, card: Dict, transactions: List[Dict]) -> None:
-        """Create a modern details window to display card information."""
-        details_window = tk.Toplevel(self.dialog)
-        details_window.title(f"Card Details - {card['card_uid']}")
-        details_window.geometry("800x600")
-        details_window.minsize(700, 500)
-        details_window.transient(self.dialog)
-        details_window.focus_force()
-        
-        # Apply theme to match main window
-        bg = self.DARK_BG if self.enable_dark_mode else self.NEUTRAL_BG
-        fg = self.LIGHT_TEXT if self.enable_dark_mode else self.DARK_TEXT
-        details_window.configure(bg=bg)
-        
-        # Main content frame with padding
-        main_frame = ttk.Frame(details_window, padding="20")
-        main_frame.pack(fill=tk.BOTH, expand=True)
-        
-        # Header section
-        header_frame = ttk.Frame(main_frame)
-        header_frame.pack(fill=tk.X, pady=(0, 15))
-        
-        # Card icon and title
-        title_label = ttk.Label(
-            header_frame,
-            text=f"💳 Card Details",
-            font=('Segoe UI', 18, 'bold'),
-            foreground=self.PRIMARY_COLOR
-        )
-        title_label.pack(anchor=tk.W)
-        
-        subtitle_label = ttk.Label(
-            header_frame,
-            text=f"UID: {card['card_uid']}",
-            font=('Segoe UI', 10),
-            foreground=self.SECONDARY_COLOR
-        )
-        subtitle_label.pack(anchor=tk.W)
-        
-        # Card info section with gradient background
-        info_frame = ttk.LabelFrame(
-            main_frame, 
-            text=" Card Information ", 
-            padding="15"
-        )
-        info_frame.pack(fill=tk.X, pady=(0, 15))
-        
-        # Balance - displayed prominently
-        balance_frame = ttk.Frame(info_frame)
-        balance_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        ttk.Label(
-            balance_frame,
-            text="Current Balance:",
-            font=('Segoe UI', 12, 'bold')
-        ).pack(side=tk.LEFT)
-        
-        ttk.Label(
-            balance_frame,
-            text=f"{card['balance']:.2f} EGP",
-            font=('Segoe UI', 14, 'bold'),
-            foreground=self.SUCCESS_COLOR
-        ).pack(side=tk.LEFT, padx=10)
-        
-        # Other card details
-        details_frame = ttk.Frame(info_frame)
-        details_frame.pack(fill=tk.X)
-        
-        # Left column
-        left_col = ttk.Frame(details_frame)
-        left_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
-        # Create date field
-        date_frame = ttk.Frame(left_col)
-        date_frame.pack(fill=tk.X, pady=5)
-        ttk.Label(date_frame, text="Created:", width=12).pack(side=tk.LEFT)
-        ttk.Label(
-            date_frame,
-            text=card['created_at'].strftime('%Y-%m-%d %H:%M:%S') if card['created_at'] else 'N/A',
-        ).pack(side=tk.LEFT)
-        
-        # Last top-up field
-        topup_frame = ttk.Frame(left_col)
-        topup_frame.pack(fill=tk.X, pady=5)
-        ttk.Label(topup_frame, text="Last Top-up:", width=12).pack(side=tk.LEFT)
-        ttk.Label(
-            topup_frame,
-            text=card['last_topped_at'].strftime('%Y-%m-%d %H:%M:%S') if card['last_topped_at'] else 'Never',
-        ).pack(side=tk.LEFT)
-        
-        # Right column
-        right_col = ttk.Frame(details_frame)
-        right_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
-        # Last employee field
-        if transactions:
-            employee_frame = ttk.Frame(right_col)
-            employee_frame.pack(fill=tk.X, pady=5)
-            ttk.Label(employee_frame, text="Last Employee:", width=12).pack(side=tk.LEFT)
-            ttk.Label(
-                employee_frame,
-                text=transactions[0]['employee'] or 'N/A',
-            ).pack(side=tk.LEFT)
-        
-        # Transaction count field
-        tx_count_frame = ttk.Frame(right_col)
-        tx_count_frame.pack(fill=tk.X, pady=5)
-        ttk.Label(tx_count_frame, text="Transactions:", width=12).pack(side=tk.LEFT)
-        ttk.Label(
-            tx_count_frame,
-            text=str(len(transactions)),
-        ).pack(side=tk.LEFT)
+        elements = self._create_modern_cover_page(report_type, period, stats)
+        elements.append(PageBreak())
         
         # Transactions section
-        tx_frame = ttk.LabelFrame(main_frame, text=f" Transaction History ({len(transactions)}) ", padding="15")
-        tx_frame.pack(fill=tk.BOTH, expand=True)
+        tx_title_style = ParagraphStyle('TxTitle', parent=getSampleStyleSheet()['Heading2'], fontSize=16, textColor=self.PRIMARY_COLOR, spaceAfter=12, fontName=f"{self.arabic_font}-Bold")
+        elements.append(Paragraph(self._bidi_process(self._translate("Transactions")), tx_title_style))
+        elements.append(Spacer(1, 0.15 * inch))
+        elements.append(self._create_modern_transactions_table(transactions))
         
-        # Create transactions table
-        tx_table_frame = ttk.Frame(tx_frame)
-        tx_table_frame.pack(fill=tk.BOTH, expand=True)
-        
-        # Scrollbars
-        vsb = ttk.Scrollbar(tx_table_frame, orient=tk.VERTICAL)
-        hsb = ttk.Scrollbar(tx_table_frame, orient=tk.HORIZONTAL)
-        
-        # Transaction treeview
-        tx_tree = ttk.Treeview(
-            tx_table_frame,
-            columns=('Type', 'Amount', 'Balance', 'Employee', 'Timestamp'),
-            show='headings',
-            yscrollcommand=vsb.set,
-            xscrollcommand=hsb.set,
-            height=10
-        )
-        
-        vsb.config(command=tx_tree.yview)
-        hsb.config(command=tx_tree.xview)
-        
-        # Configure columns
-        tx_tree.heading('Type', text='Transaction Type')
-        tx_tree.heading('Amount', text='Amount (EGP)')
-        tx_tree.heading('Balance', text='Balance After (EGP)')
-        tx_tree.heading('Employee', text='Employee')
-        tx_tree.heading('Timestamp', text='Timestamp')
-        
-        tx_tree.column('Type', width=120, anchor=tk.CENTER)
-        tx_tree.column('Amount', width=100, anchor=tk.E)
-        tx_tree.column('Balance', width=120, anchor=tk.E)
-        tx_tree.column('Employee', width=150, anchor=tk.W)
-        tx_tree.column('Timestamp', width=160, anchor=tk.CENTER)
-        
-        # Add transaction data
-        for idx, tx in enumerate(transactions):
-            tx_type = "TOP-UP" if tx['type'] == 'topup' else "READ"
-            icon = "⬆️" if tx['type'] == 'topup' else "📖"
-            tag = 'topup' if tx['type'] == 'topup' else 'read'
+        # Charts section
+        if HAS_MATPLOTLIB and transactions:
+            elements.append(PageBreak())
+            analytics_style = ParagraphStyle('AnalyticsTitle', parent=getSampleStyleSheet()['Heading2'], fontSize=16, textColor=self.PRIMARY_COLOR, spaceAfter=12, fontName=f"{self.arabic_font}-Bold")
+            elements.append(Paragraph(self._bidi_process(self._translate("Analytics")), analytics_style))
+            elements.append(Spacer(1, 0.15 * inch))
             
-            tx_tree.insert('', tk.END, values=(
-                f"{icon} {tx_type}",
-                f"{tx['amount']:.2f}",
-                f"{tx['balance_after']:.2f}",
-                tx['employee'] or 'N/A',
-                tx['timestamp'].strftime('%Y-%m-%d %H:%M:%S')
-            ), tags=(tag,))
+            # Pie Chart
+            pie_chart = ModernChartGenerator.generate_transaction_pie_chart(transactions, use_arabic=self.use_arabic)
+            if pie_chart:
+                img = Image(pie_chart, width=4*inch, height=4*inch); elements.append(img); elements.append(Spacer(1, 0.2 * inch))
+            
+            # Bar Chart
+            bar_chart = ModernChartGenerator.generate_daily_amount_chart(transactions, width=7, height=4, use_arabic=self.use_arabic)
+            if bar_chart:
+                img = Image(bar_chart, width=7*inch, height=4*inch); elements.append(img)
+
+        pdf_path = self._get_report_filename(report_type.lower().replace(' ', '_'), 'pdf', identifier)
+        return self._generate_pdf(pdf_path.name, elements, landscape_mode=landscape_mode)
+
+
+    def generate_daily_report(self, date: Optional[datetime] = None) -> str:
+        """Generate modern daily report."""
+        date = date or datetime.now().date()
+        if isinstance(date, str): date = datetime.strptime(date, '%Y-%m-%d').date()
         
-        # Configure transaction row colors
-        tx_tree.tag_configure('topup', background='#E8F5E9')  # Light green for topups
-        tx_tree.tag_configure('read', background='#E3F2FD')   # Light blue for reads
+        start_date = datetime.combine(date, datetime.min.time())
+        end_date = datetime.combine(date, datetime.max.time())
         
-        # Layout with scrollbars
-        tx_tree.grid(row=0, column=0, sticky='nsew')
-        vsb.grid(row=0, column=1, sticky='ns')
-        hsb.grid(row=1, column=0, sticky='ew')
+        # Assuming db_service is implemented and returns List[Dict]
+        transactions = self.db_service.get_transactions(start_date=start_date, end_date=end_date) if hasattr(self.db_service, 'get_transactions') else []
+        period = date.strftime('%Y-%m-%d')
+        identifier = date.strftime('%Y%m%d')
         
-        tx_table_frame.grid_rowconfigure(0, weight=1)
-        tx_table_frame.grid_columnconfigure(0, weight=1)
+        return self.generate_report('Daily Report', transactions, period, identifier)
+
+    def generate_weekly_report(self, week_start: Optional[datetime] = None) -> str:
+        """Generate modern weekly report."""
+        if week_start is None:
+            today = datetime.now().date()
+            week_start = today - timedelta(days=today.weekday())
+        elif isinstance(week_start, str):
+            week_start = datetime.strptime(week_start, '%Y-%m-%d').date()
         
-        # Footer with action buttons
+        week_end = week_start + timedelta(days=6)
+        start_date = datetime.combine(week_start, datetime.min.time())
+        end_date = datetime.combine(week_end, datetime.max.time())
+        
+        transactions = self.db_service.get_transactions(start_date=start_date, end_date=end_date) if hasattr(self.db_service, 'get_transactions') else []
+        period = f"{week_start.strftime('%Y-%m-%d')} to {week_end.strftime('%Y-%m-%d')}"
+        identifier = week_start.strftime('%Y%m%d')
+        
+        return self.generate_report('Weekly Report', transactions, period, identifier, landscape_mode=True)
+
+    def generate_monthly_report(self, month: Optional[int] = None, year: Optional[int] = None) -> str:
+        """Generate modern monthly report."""
+        now = datetime.now()
+        month = month or now.month; year = year or now.year
+        
+        start_date = datetime(year, month, 1)
+        end_date = datetime(year, month % 12 + 1, 1) - timedelta(seconds=1) if month < 12 else datetime(year + 1, 1, 1) - timedelta(seconds=1)
+        
+        transactions = self.db_service.get_transactions(start_date=start_date, end_date=end_date) if hasattr(self.db_service, 'get_transactions') else []
+        period = start_date.strftime('%B %Y')
+        identifier = f"{year}{month:02d}"
+        
+        return self.generate_report('Monthly Report', transactions, period, identifier, landscape_mode=True)
+
+    def generate_custom_report(self, start_date: datetime, end_date: datetime, card_uid: Optional[str] = None) -> str:
+        """Generate modern custom date range report."""
+        if isinstance(start_date, str): start_date = datetime.strptime(start_date, '%Y-%m-%d')
+        if isinstance(end_date, str): end_date = datetime.strptime(end_date, '%Y-%m-%d')
+        
+        transactions = self.db_service.get_transactions(start_date=start_date, end_date=end_date, card_uid=card_uid) if hasattr(self.db_service, 'get_transactions') else []
+        
+        period_str = f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}"
+        if card_uid: period_str += f" ({self._translate('Card UID')}: {card_uid[:16]}...)"
+        
+        identifier = f"{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}"
+        if card_uid: identifier += f"_{card_uid[:8]}"
+        
+        return self.generate_report('Custom Report', transactions, period_str, identifier, landscape_mode=True)
+
+    # Note: generate_beautiful_arabic_report is already PDF-only and remains functional.
+
+    def generate_beautiful_arabic_report(self, cards: List[Dict], output_path: Optional[str] = None) -> str:
+        """Generate a visually appealing PDF report in Arabic with beautiful styling."""
+        if not HAS_REPORTLAB: raise ImportError("reportlab is required for PDF generation")
+        
+        original_setting = self.use_arabic; self.use_arabic = True
+        filepath = Path(output_path) if output_path else self._get_report_filename('arabic', 'pdf')
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Mock transactions and stats for demonstration
+        transactions_map = {card['card_uid']: [] for card in cards if 'card_uid' in card}
+        total_cards = len(cards); total_balance = sum(card.get('balance', 0) for card in cards)
+        avg_balance = total_balance / total_cards if total_cards > 0 else 0
+        total_transactions = sum(len(txs) for txs in transactions_map.values())
+        
+        styles = getSampleStyleSheet()
+        font_name = self.arabic_font; font_name_bold = f'{self.arabic_font}-Bold'
+        
+        title_style = ParagraphStyle('ArabicTitle', parent=styles['Title'], fontName=font_name_bold, fontSize=28, leading=34, alignment=TA_RIGHT, textColor=self.PRIMARY_COLOR, spaceAfter=20)
+        subtitle_style = ParagraphStyle('ArabicSubtitle', parent=styles['Heading2'], fontName=font_name_bold, fontSize=18, leading=22, alignment=TA_RIGHT, textColor=self.SECONDARY_COLOR, spaceAfter=12)
+        heading_style = ParagraphStyle('ArabicHeading', parent=styles['Heading3'], fontName=font_name_bold, fontSize=14, leading=18, alignment=TA_RIGHT, textColor=self.PRIMARY_COLOR, spaceAfter=8)
+        body_rtl_style = ParagraphStyle('ArabicBody', parent=styles['Normal'], fontName=font_name, fontSize=10, leading=14, alignment=TA_RIGHT, spaceAfter=8)
+        
+        elements = []
+        elements.append(Spacer(1, 1 * inch))
+        elements.append(Paragraph(self._bidi_process("تقرير بطاقات نظام الاستقبال"), title_style))
+        elements.append(Paragraph(self._bidi_process("نظام إدارة البطاقات الذكية"), subtitle_style))
+        elements.append(Spacer(1, 0.5 * inch))
+        
+        date_str = ArabicTextHelper.format_date_arabic(datetime.now())
+        elements.append(Paragraph(self._bidi_process(f"تم إنشاؤه في: {date_str}"), body_rtl_style))
+        elements.append(Spacer(1, 0.3 * inch))
+        
+        elements.append(Paragraph(self._bidi_process("الإحصائيات الرئيسية"), heading_style))
+        stats_data_raw = [
+            ["المؤشر", "القيمة"],  ["إجمالي البطاقات", ArabicTextHelper.to_arabic_numerals(total_cards)],
+            ["إجمالي الرصيد", ArabicTextHelper.format_currency_arabic(total_balance) + " جنيه"],
+            ["متوسط الرصيد", ArabicTextHelper.format_currency_arabic(avg_balance) + " جنيه"],
+            ["إجمالي المعاملات", ArabicTextHelper.to_arabic_numerals(total_transactions)],
+        ]
+        
+        stats_data = [ [self._bidi_process(row[1]), self._bidi_process(row[0])] for row in stats_data_raw ]
+        stats_table = Table(stats_data, colWidths=[2.5*inch, 3*inch])
+        stats_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (1, 0), self.PRIMARY_COLOR), ('FONTNAME', (0, 0), (1, 0), font_name_bold), ('ALIGN', (0, 0), (1, 0), 'CENTER'),
+            ('FONTNAME', (0, 1), (1, -1), font_name), ('ALIGN', (0, 0), (0, -1), 'RIGHT'),  ('ALIGN', (1, 0), (1, -1), 'RIGHT'), 
+            ('GRID', (0, 0), (1, -1), 0.5, colors.grey), ('ROWBACKGROUNDS', (0, 1), (1, -1), [self.LIGHT_BG, colors.white]),
+        ]))
+        
+        elements.append(stats_table); elements.append(PageBreak())
+        elements.append(Paragraph(self._bidi_process("قائمة البطاقات"), heading_style)); elements.append(Spacer(1, 0.2 * inch))
+        
+        cards_data_raw = [["معرّف البطاقة", "تاريخ الإنشاء", "آخر شحن", "الرصيد (جنيه)"]]
+        for card in sorted(cards, key=lambda x: x.get('balance', 0), reverse=True): 
+            card_uid = card.get('card_uid', 'N/A')
+            created = ArabicTextHelper.format_date_arabic(card.get('created_at')) if card.get('created_at') else 'غير متاح'
+            last_topup = ArabicTextHelper.format_date_arabic(card.get('last_topped_at')) if card.get('last_topped_at') else 'غير متاح'
+            balance = ArabicTextHelper.format_currency_arabic(card.get('balance', 0))
+            cards_data_raw.append([card_uid, created, last_topup, balance])
+        
+        cards_data = [ [self._bidi_process(item) for item in row[::-1]] for row in cards_data_raw ]
+        
+        cards_table = Table(cards_data, repeatRows=1)
+        cards_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), self.PRIMARY_COLOR), ('FONTNAME', (0, 0), (-1, 0), font_name_bold), ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('FONTNAME', (0, 1), (-1, -1), font_name), ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey), ('ROWBACKGROUNDS', (0, 1), (-1, -1), [self.LIGHT_BG, colors.white]),
+        ]))
+        
+        elements.append(cards_table)
+        
+        doc = SimpleDocTemplate(
+            str(filepath), pagesize=A4, rightMargin=0.8 * inch, leftMargin=0.8 * inch, topMargin=0.8 * inch, bottomMargin=0.8 * inch,
+        )
+        header_footer = ModernPDFHeaderFooter('نظام إدارة البطاقات الذكية', use_arabic=True, id='arabic_template')
+        doc.addPageTemplates([header_footer])
+        doc.build(elements)
+        
+        self.use_arabic = original_setting
+        logger.info(f"Beautiful Arabic report generated: {filepath}")
+        return str(filepath)
+
+
+class ReportsGenerator(ModernReportsGenerator):
+    """Backward-compatible alias for legacy imports."""
+    pass
+
+# Remove PyQt imports and use Tkinter instead
+import tkinter as tk
+from tkinter import ttk, messagebox
+import logging
+
+# Remove the PyQt-based ViewAllCardsDialog class and replace with Tkinter version
+class ViewAllCardsDialog(tk.Toplevel):
+    def __init__(self, parent, db_service):
+        super().__init__(parent)
+        self.db_service = db_service
+        self.title("View All Cards")
+        self.geometry("800x600")
+        self.resizable(True, True)
+        
+        # Fetch cards data
+        try:
+            self.cards = self.db_service.get_all_cards()  # Assume this method exists; adjust if needed
+        except AttributeError:
+            self.cards = []  # Fallback if method doesn't exist
+            logging.warning("db_service.get_all_cards() not found; using empty list")
+        
+        self.setup_ui()
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+    
+    def setup_ui(self):
+        # Main frame
+        main_frame = ttk.Frame(self, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Title
+        title_label = ttk.Label(main_frame, text="All Cards", font=("Arial", 16, "bold"))
+        title_label.pack(pady=10)
+        
+        # Cards table
+        columns = ("UID", "Balance", "Created At", "Last Top-Up")
+        self.tree = ttk.Treeview(main_frame, columns=columns, show="headings", height=15)
+        for col in columns:
+            self.tree.heading(col, text=col)
+            self.tree.column(col, width=150, anchor=tk.CENTER)
+        self.tree.pack(fill=tk.BOTH, expand=True, pady=10)
+        
+        # Populate table
+        for card in self.cards:
+            uid = card.get('card_uid', 'N/A')
+            balance = f"{card.get('balance', 0):.2f} EGP"
+            created = card.get('created_at', 'N/A').strftime('%Y-%m-%d') if card.get('created_at') else 'N/A'
+            last_topup = card.get('last_topped_at', 'N/A').strftime('%Y-%m-%d') if card.get('last_topped_at') else 'N/A'
+            self.tree.insert("", tk.END, values=(uid, balance, created, last_topup))
+        
+        # Buttons frame
         button_frame = ttk.Frame(main_frame)
-        button_frame.pack(fill=tk.X, pady=(15, 0))
+        button_frame.pack(pady=10)
         
-        # Export button
-        ttk.Button(
-            button_frame,
-            text=f"{self.ICON_EXPORT} Export Details",
-            command=lambda: self._export_card_details_to_file(card, transactions)
-        ).pack(side=tk.LEFT)
-        
-        # Delete button
-        ttk.Button(
-            button_frame,
-            text=f"{self.ICON_DELETE} Delete Card",
-            command=lambda: self._delete_card_from_details(card['card_uid'], details_window),
-            style='Accent.TButton'
-        ).pack(side=tk.LEFT, padx=10)
+        # Export Arabic PDF button
+        export_btn = ttk.Button(button_frame, text="Export Arabic PDF", command=self.export_arabic_pdf)
+        export_btn.pack(side=tk.LEFT, padx=5)
         
         # Close button
-        ttk.Button(
-            button_frame,
-            text="Close",
-            command=details_window.destroy
-        ).pack(side=tk.RIGHT)
+        close_btn = ttk.Button(button_frame, text="Close", command=self.on_close)
+        close_btn.pack(side=tk.LEFT, padx=5)
     
-    def _delete_card_from_details(self, card_uid: str, details_window: tk.Toplevel) -> None:
-        """Delete the card from the details window."""
-        if messagebox.askyesno("Confirm Deletion", f"Delete card '{card_uid}' and all its transactions?\nThis cannot be undone!"):
-            try:
-                self.db_service.delete_card(card_uid)
-                messagebox.showinfo("Success", f"Card '{card_uid}' deleted successfully")
-                details_window.destroy()
-                # Refresh the main dialog
-                self._load_cards_async()
-                logger.info(f"Card {card_uid} deleted from details window")
-            except Exception as e:
-                logger.error(f"Error deleting card {card_uid}: {e}")
-                messagebox.showerror("Error", f"Failed to delete card: {e}")
+    def export_arabic_pdf(self):
+        """Export all cards to an Arabic PDF report."""
+        if not self.cards:
+            messagebox.showwarning("No Cards", "No cards available to export.", parent=self)
+            return
+        
+        # Prompt user for save location
+        from datetime import datetime
+        default_filename = f"arabic_cards_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        output_path = filedialog.asksaveasfilename(
+            parent=self,
+            defaultextension=".pdf",
+            filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
+            initialfile=default_filename,
+            title="Save Arabic PDF Report"
+        )
+        
+        if not output_path:
+            messagebox.showinfo("Cancelled", "Export cancelled.", parent=self)
+            return
+        
+        try:
+            # Instantiate the reports generator
+            generator = ModernReportsGenerator(self.db_service, use_arabic=True)
+            
+            # Generate the report with the selected path
+            final_path = generator.generate_beautiful_arabic_report(self.cards, output_path=output_path)
+            
+            messagebox.showinfo("Export Successful", f"Arabic PDF report saved to: {final_path}", parent=self)
+        except ImportError as e:
+            messagebox.showerror("Missing Dependencies", f"Required libraries are missing: {e}", parent=self)
+        except Exception as e:
+            messagebox.showerror("Export Failed", f"An error occurred: {e}", parent=self)
+    
+    def on_close(self):
+        self.destroy()
