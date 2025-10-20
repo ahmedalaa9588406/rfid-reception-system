@@ -21,10 +21,11 @@ class MainWindow:
         self.config = config
         
         self.root.title("RFID Reception System")
-        self.root.geometry("600x500")
+        self.root.geometry("600x550")
         
         self.current_card_uid = None
         self.current_balance = 0.0
+        self.manual_mode = False
         
         self._create_widgets()
         self._check_serial_connection()
@@ -61,24 +62,47 @@ class MainWindow:
         )
         
         # Read Card button
-        ttk.Button(main_frame, text="Read Card", 
-                  command=self._read_card).grid(
+        self.read_card_btn = ttk.Button(main_frame, text="Read Card", 
+                  command=self._read_card)
+        self.read_card_btn.grid(
             row=3, column=0, columnspan=3, pady=10, sticky=(tk.W, tk.E)
         )
         
+        # Manual mode section
+        manual_frame = ttk.LabelFrame(main_frame, text="Manual Entry Mode", padding="5")
+        manual_frame.grid(row=4, column=0, columnspan=3, pady=10, sticky=(tk.W, tk.E))
+        
+        # Manual mode checkbox
+        self.manual_mode_var = tk.BooleanVar(value=False)
+        manual_check = ttk.Checkbutton(manual_frame, text="Use Manual Entry", 
+                                       variable=self.manual_mode_var,
+                                       command=self._toggle_manual_mode)
+        manual_check.grid(row=0, column=0, sticky=tk.W, pady=5)
+        
+        # Manual UID entry
+        ttk.Label(manual_frame, text="Card UID:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        self.manual_uid_var = tk.StringVar()
+        self.manual_uid_entry = ttk.Entry(manual_frame, textvariable=self.manual_uid_var, 
+                                          font=('Arial', 10), width=30, state='disabled')
+        self.manual_uid_entry.grid(row=1, column=1, sticky=tk.W, pady=5, padx=5)
+        
+        self.manual_load_btn = ttk.Button(manual_frame, text="Load Card", 
+                                          command=self._load_manual_card, state='disabled')
+        self.manual_load_btn.grid(row=1, column=2, pady=5)
+        
         # Amount input section
         ttk.Label(main_frame, text="Top-Up Amount:", font=('Arial', 10)).grid(
-            row=4, column=0, sticky=tk.W, pady=5
+            row=5, column=0, sticky=tk.W, pady=5
         )
         self.amount_var = tk.StringVar()
         amount_entry = ttk.Entry(main_frame, textvariable=self.amount_var, 
                                 font=('Arial', 12), width=15)
-        amount_entry.grid(row=4, column=1, sticky=tk.W, pady=5)
-        ttk.Label(main_frame, text="EGP").grid(row=4, column=2, sticky=tk.W, pady=5)
+        amount_entry.grid(row=5, column=1, sticky=tk.W, pady=5)
+        ttk.Label(main_frame, text="EGP").grid(row=5, column=2, sticky=tk.W, pady=5)
         
         # Quick amount buttons
         quick_frame = ttk.LabelFrame(main_frame, text="Quick Amounts", padding="5")
-        quick_frame.grid(row=5, column=0, columnspan=3, pady=10, sticky=(tk.W, tk.E))
+        quick_frame.grid(row=6, column=0, columnspan=3, pady=10, sticky=(tk.W, tk.E))
         
         amounts = [10, 20, 50, 100]
         for i, amount in enumerate(amounts):
@@ -91,12 +115,12 @@ class MainWindow:
         ttk.Button(main_frame, text="Top-Up", 
                   command=self._top_up, 
                   style='Accent.TButton').grid(
-            row=6, column=0, columnspan=3, pady=15, sticky=(tk.W, tk.E)
+            row=7, column=0, columnspan=3, pady=15, sticky=(tk.W, tk.E)
         )
         
         # Action buttons frame
         actions_frame = ttk.Frame(main_frame)
-        actions_frame.grid(row=7, column=0, columnspan=3, pady=10, sticky=(tk.W, tk.E))
+        actions_frame.grid(row=8, column=0, columnspan=3, pady=10, sticky=(tk.W, tk.E))
         
         ttk.Button(actions_frame, text="View Transactions", 
                   command=self._show_transactions).pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
@@ -109,7 +133,7 @@ class MainWindow:
         self.status_var = tk.StringVar(value="Ready")
         status_bar = ttk.Label(main_frame, textvariable=self.status_var, 
                               relief=tk.SUNKEN, anchor=tk.W)
-        status_bar.grid(row=8, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(10, 0))
+        status_bar.grid(row=9, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(10, 0))
         
         # Configure grid weights
         self.root.columnconfigure(0, weight=1)
@@ -121,7 +145,48 @@ class MainWindow:
         if self.serial_service.is_connected:
             self.status_var.set(f"Connected to {self.serial_service.port}")
         else:
-            self.status_var.set("Not connected to Arduino - Check settings")
+            self.status_var.set("Not connected to Arduino - Check settings or use manual mode")
+    
+    def _toggle_manual_mode(self):
+        """Toggle between manual and Arduino mode."""
+        self.manual_mode = self.manual_mode_var.get()
+        
+        if self.manual_mode:
+            # Enable manual mode
+            self.manual_uid_entry.config(state='normal')
+            self.manual_load_btn.config(state='normal')
+            self.read_card_btn.config(state='disabled')
+            self.status_var.set("Manual Entry Mode: Enter card UID manually")
+        else:
+            # Disable manual mode
+            self.manual_uid_entry.config(state='disabled')
+            self.manual_load_btn.config(state='disabled')
+            self.read_card_btn.config(state='normal')
+            self._check_serial_connection()
+    
+    def _load_manual_card(self):
+        """Load a card using manually entered UID."""
+        uid = self.manual_uid_var.get().strip()
+        
+        if not uid:
+            messagebox.showwarning("Warning", "Please enter a card UID.")
+            return
+        
+        # Validate UID format (basic validation - alphanumeric and some special chars)
+        if not uid.replace('-', '').replace('_', '').isalnum():
+            messagebox.showerror("Error", "Invalid UID format. Use alphanumeric characters only.")
+            return
+        
+        self.current_card_uid = uid
+        self.card_uid_var.set(uid)
+        
+        # Get current balance from database
+        balance = self.db_service.get_card_balance(uid)
+        self.current_balance = balance
+        self.balance_var.set(f"{balance:.2f} EGP")
+        
+        self.status_var.set(f"Manual mode: Card {uid} loaded")
+        messagebox.showinfo("Success", f"Card loaded: {uid}\nBalance: {balance:.2f} EGP")
     
     def _read_card(self):
         """Read RFID card from Arduino."""
@@ -152,7 +217,7 @@ class MainWindow:
     def _top_up(self):
         """Perform top-up operation."""
         if not self.current_card_uid:
-            messagebox.showwarning("Warning", "Please read a card first.")
+            messagebox.showwarning("Warning", "Please read a card or enter a card UID first.")
             return
         
         try:
@@ -164,14 +229,16 @@ class MainWindow:
             messagebox.showerror("Error", "Please enter a valid amount.")
             return
         
-        if not self.serial_service.is_connected:
-            messagebox.showerror("Error", "Not connected to Arduino. Please check settings.")
+        # Check if we need Arduino connection for non-manual mode
+        if not self.manual_mode and not self.serial_service.is_connected:
+            messagebox.showerror("Error", "Not connected to Arduino. Please check settings or use manual mode.")
             return
         
         # Confirm top-up
+        mode_text = "Manual Mode" if self.manual_mode else "Arduino Mode"
         confirm = messagebox.askyesno(
             "Confirm Top-Up",
-            f"Top-up {amount:.2f} EGP to card {self.current_card_uid}?"
+            f"Top-up {amount:.2f} EGP to card {self.current_card_uid}?\n\nMode: {mode_text}"
         )
         
         if not confirm:
@@ -180,35 +247,62 @@ class MainWindow:
         self.status_var.set("Processing top-up...")
         self.root.update()
         
-        # Write to Arduino
-        success, uid, message = self.serial_service.write_card(amount)
-        
-        if success:
+        # Handle top-up based on mode
+        if self.manual_mode:
+            # Manual mode: Skip Arduino write, only update database
             try:
-                # Save to database
                 new_balance, transaction_id = self.db_service.top_up(
                     self.current_card_uid, 
                     amount,
-                    employee=self.config.get('employee_name', 'Receptionist')
+                    employee=self.config.get('employee_name', 'Receptionist'),
+                    notes='Manual entry mode'
                 )
                 
                 self.current_balance = new_balance
                 self.balance_var.set(f"{new_balance:.2f} EGP")
                 self.amount_var.set("")
                 
-                self.status_var.set("Top-up successful")
+                self.status_var.set("Top-up successful (Manual mode)")
                 messagebox.showinfo(
                     "Success", 
-                    f"Top-up successful!\n\nCard: {self.current_card_uid}\n"
-                    f"Amount: {amount:.2f} EGP\nNew Balance: {new_balance:.2f} EGP"
+                    f"Top-up successful! (Manual Mode)\n\nCard: {self.current_card_uid}\n"
+                    f"Amount: {amount:.2f} EGP\nNew Balance: {new_balance:.2f} EGP\n\n"
+                    f"Note: Card was not physically written to."
                 )
             except Exception as e:
-                logger.error(f"Database error during top-up: {e}")
+                logger.error(f"Database error during manual top-up: {e}")
                 messagebox.showerror("Error", f"Failed to save to database: {e}")
                 self.status_var.set("Database error")
         else:
-            self.status_var.set("Top-up failed")
-            messagebox.showerror("Error", f"Failed to write to card: {message}")
+            # Arduino mode: Write to card and update database
+            success, uid, message = self.serial_service.write_card(amount)
+            
+            if success:
+                try:
+                    # Save to database
+                    new_balance, transaction_id = self.db_service.top_up(
+                        self.current_card_uid, 
+                        amount,
+                        employee=self.config.get('employee_name', 'Receptionist')
+                    )
+                    
+                    self.current_balance = new_balance
+                    self.balance_var.set(f"{new_balance:.2f} EGP")
+                    self.amount_var.set("")
+                    
+                    self.status_var.set("Top-up successful")
+                    messagebox.showinfo(
+                        "Success", 
+                        f"Top-up successful!\n\nCard: {self.current_card_uid}\n"
+                        f"Amount: {amount:.2f} EGP\nNew Balance: {new_balance:.2f} EGP"
+                    )
+                except Exception as e:
+                    logger.error(f"Database error during top-up: {e}")
+                    messagebox.showerror("Error", f"Failed to save to database: {e}")
+                    self.status_var.set("Database error")
+            else:
+                self.status_var.set("Top-up failed")
+                messagebox.showerror("Error", f"Failed to write to card: {message}")
     
     def _show_transactions(self):
         """Show transactions dialog."""
