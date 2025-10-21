@@ -178,14 +178,15 @@ class ModernPDFHeaderFooter(PageTemplate):
     """Modern PDF header and footer with branding."""
     
     def __init__(self, company_name: str = "Card Management System", 
-                 use_arabic: bool = False, *args, **kwargs):
+                 use_arabic: bool = False, pagesize=None, *args, **kwargs):
         """Initialize header/footer template."""
+        pg = pagesize if pagesize else A4
         frame = Frame(
-            0.8 * inch, 0.8 * inch, 
-            A4[0] - 1.6 * inch, A4[1] - 1.6 * inch, 
+            0.5 * inch, 0.5 * inch, 
+            pg[0] - 1.0 * inch, pg[1] - 1.0 * inch, 
             id='normal'
         )
-        super().__init__(frames=[frame], *args, **kwargs)
+        super().__init__(frames=[frame], pagesize=pg, *args, **kwargs)
         self.company_name = company_name
         self.use_arabic = use_arabic
         self.primary_color = HexColor("#2E86AB")
@@ -541,14 +542,14 @@ class ModernReportsGenerator:
         
         return elements
     
-    def _create_modern_transactions_table(self, transactions: List[Dict]) -> Table:
+    def _create_modern_transactions_table(self, transactions: List[Dict], landscape_mode: bool = False) -> Table:
         """Create modern formatted transactions table."""
         
         font_name = self.arabic_font if self.use_arabic else 'Helvetica'
         font_name_bold = f"{font_name}-Bold" if self.use_arabic else 'Helvetica-Bold'
         styles = getSampleStyleSheet()
-        header_par_style = ParagraphStyle('TblHeader', parent=styles['Normal'], fontName=font_name_bold, fontSize=9, alignment=TA_RIGHT if self.use_arabic else TA_CENTER)
-        body_par_style = ParagraphStyle('TblBody', parent=styles['Normal'], fontName=font_name, fontSize=8, alignment=TA_RIGHT if self.use_arabic else TA_LEFT)
+        header_par_style = ParagraphStyle('TblHeader', parent=styles['Normal'], fontName=font_name_bold, fontSize=9, alignment=TA_RIGHT if self.use_arabic else TA_CENTER, wordWrap='CJK', leading=11)
+        body_par_style = ParagraphStyle('TblBody', parent=styles['Normal'], fontName=font_name, fontSize=8, alignment=TA_RIGHT if self.use_arabic else TA_LEFT, wordWrap='CJK', leading=10)
         
         # Table data
         header_row = [
@@ -559,7 +560,6 @@ class ModernReportsGenerator:
             self._bidi_process(self._translate('Balance After (EGP)')),
             self._bidi_process(self._translate('Employee')),
             self._bidi_process(self._translate('Timestamp')),
-            self._bidi_process(self._translate('Notes')),
         ]
         table_data_raw = [header_row]
         
@@ -570,13 +570,12 @@ class ModernReportsGenerator:
             
             row = [
                 self._bidi_process(str(t.get('id', ''))),
-                self._bidi_process(t['card_uid'][:12] + '...' if len(t['card_uid']) > 12 else t['card_uid']),
+                self._bidi_process(t.get('card_uid', '')),
                 self._bidi_process(tx_type),
                 self._bidi_process(amount),
                 self._bidi_process(balance),
-                self._bidi_process(t.get('employee', 'N/A')[:15]),
+                self._bidi_process(t.get('employee', 'N/A')),
                 self._bidi_process(ArabicTextHelper.format_date_arabic(t['timestamp']) if self.use_arabic else t['timestamp'].strftime('%Y-%m-%d %H:%M')),
-                self._bidi_process((t.get('notes', 'N/A') or self._translate('N/A'))[:20])
             ]
             table_data_raw.append(row)
         
@@ -584,7 +583,7 @@ class ModernReportsGenerator:
         total_amount = sum(t['amount'] for t in transactions if t['type'] == 'topup')
         total_formatted = ArabicTextHelper.format_currency_arabic(total_amount) if self.use_arabic else f"{total_amount:.2f}"
         total_row = [
-            '', '', self._bidi_process(self._translate('TOTAL')), self._bidi_process(total_formatted), '', '', '', ''
+            '', '', self._bidi_process(self._translate('TOTAL')), self._bidi_process(total_formatted), '', '', ''
         ]
         table_data_raw.append(total_row)
         
@@ -592,30 +591,38 @@ class ModernReportsGenerator:
         if self.use_arabic:
             table_data = [row[::-1] for row in table_data_raw]
             header_align = 'RIGHT'; content_align_left = 'RIGHT'; content_align_right = 'LEFT'
-            total_text_col = 5; total_value_col = 4
+            total_text_col = 4; total_value_col = 3
         else:
             table_data = table_data_raw
             header_align = 'CENTER'; content_align_left = 'LEFT'; content_align_right = 'RIGHT'
             total_text_col = 2; total_value_col = 3
         
-        # Convert to Paragraphs for reliable Arabic shaping in table cells
-        if self.use_arabic:
-            table_data_par = []
-            for r_idx, row in enumerate(table_data):
-                style = header_par_style if r_idx == 0 else body_par_style
-                table_data_par.append([Paragraph(str(cell), style) for cell in row])
-            table_data = table_data_par
-        
-        col_widths = [0.5*inch, 1.2*inch, 0.8*inch, 1*inch, 1*inch, 1*inch, 1.2*inch, 1.3*inch]
-        table = Table(table_data, colWidths=col_widths)
+        # Convert to Paragraphs for proper wrapping in table cells (both Arabic and English)
+        table_data_par = []
+        for r_idx, row in enumerate(table_data):
+            style = header_par_style if r_idx == 0 else body_par_style
+            table_data_par.append([Paragraph(str(cell), style) for cell in row])
+        table_data = table_data_par
+
+        # Compute dynamic column widths based on page orientation and margins
+        available_width = (A4[1] if landscape_mode else A4[0]) - 1.0 * inch  # match 0.5" margins on both sides
+        proportions = [0.06, 0.18, 0.08, 0.12, 0.12, 0.18, 0.26]  # 7 columns: ID, UID, Type, Amount, Balance, Employee, Timestamp
+        col_widths = [available_width * p for p in (proportions[::-1] if self.use_arabic else proportions)]
+
+        table = Table(table_data, colWidths=col_widths, repeatRows=1, splitByRow=1)
         
         # Modern table styling
+        num_start = 2 if self.use_arabic else 3
+        num_end = 3 if self.use_arabic else 4
         table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), self.PRIMARY_COLOR), ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, 0), header_align), ('FONTNAME', (0, 0), (-1, 0), font_name_bold), ('FONTSIZE', (0, 0), (-1, 0), 9),
-            ('ALIGN', (0, 1), (-1, -2), content_align_left), ('ALIGN', (3, 1), (4, -2), content_align_right),
+            ('ALIGN', (0, 1), (-1, -2), content_align_left), ('ALIGN', (num_start, 1), (num_end, -2), content_align_right),
             ('FONTSIZE', (0, 1), (-1, -2), 8), ('FONTNAME', (0, 1), (-1, -2), font_name),
             ('ROWBACKGROUNDS', (0, 1), (-1, -2), [colors.white, self.LIGHT_BG]),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 3), ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+            ('TOPPADDING', (0, 0), (-1, -1), 3), ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
             
             # Total row
             ('BACKGROUND', (0, -1), (-1, -1), self.SUCCESS_COLOR), ('TEXTCOLOR', (0, -1), (-1, -1), colors.whitesmoke),
@@ -646,11 +653,11 @@ class ModernReportsGenerator:
             pagesize = landscape(A4) if landscape_mode else A4
             doc = SimpleDocTemplate(
                 str(filepath), pagesize=pagesize, rightMargin=0.5 * inch, leftMargin=0.5 * inch, 
-                topMargin=0.9 * inch, bottomMargin=0.9 * inch
+                topMargin=0.5 * inch, bottomMargin=0.5 * inch
             )
             
             header_footer = ModernPDFHeaderFooter(
-                self.company_name, use_arabic=self.use_arabic, id='standard_template'
+                self.company_name, use_arabic=self.use_arabic, pagesize=pagesize, id='standard_template'
             )
             doc.addPageTemplates([header_footer])
             
@@ -677,7 +684,7 @@ class ModernReportsGenerator:
         )
         elements.append(Paragraph(self._bidi_process(self._translate("Transactions")), tx_title_style))
         elements.append(Spacer(1, 0.15 * inch))
-        elements.append(self._create_modern_transactions_table(transactions))
+        elements.append(self._create_modern_transactions_table(transactions, landscape_mode=landscape_mode))
 
         # Charts section
         if HAS_MATPLOTLIB and transactions:
