@@ -124,17 +124,29 @@ class DatabaseService:
             session.close()
     
     def get_all_cards(self):
-        """Get all cards."""
+        """Get all cards with their most recent employee information."""
         session = self.Session()
         try:
             cards = session.query(Card).all()
-            result = [{
-                'id': c.id,
-                'card_uid': c.card_uid,
-                'balance': c.balance,
-                'created_at': c.created_at,
-                'last_topped_at': c.last_topped_at
-            } for c in cards]
+            result = []
+            
+            for c in cards:
+                # Get the most recent transaction for this card to fetch employee info
+                recent_transaction = session.query(Transaction).filter_by(
+                    card_uid=c.card_uid
+                ).order_by(Transaction.timestamp.desc()).first()
+                
+                employee_name = recent_transaction.employee if recent_transaction else 'N/A'
+                
+                result.append({
+                    'id': c.id,
+                    'card_uid': c.card_uid,
+                    'balance': c.balance,
+                    'created_at': c.created_at,
+                    'last_topped_at': c.last_topped_at,
+                    'employee_name': employee_name
+                })
+            
             return result
         except SQLAlchemyError as e:
             logger.error(f"Error getting all cards: {e}")
@@ -174,6 +186,27 @@ class DatabaseService:
         except SQLAlchemyError as e:
             session.rollback()
             logger.error(f"Error logging card read event: {e}")
+            raise
+        finally:
+            session.close()
+    
+    def delete_card(self, card_uid):
+        """Delete a card and all its transactions."""
+        session = self.Session()
+        try:
+            # Delete all transactions for this card
+            session.query(Transaction).filter_by(card_uid=card_uid).delete()
+            
+            # Delete the card itself
+            card = session.query(Card).filter_by(card_uid=card_uid).first()
+            if card:
+                session.delete(card)
+            
+            session.commit()
+            logger.info(f"Card {card_uid} and its transactions deleted")
+        except SQLAlchemyError as e:
+            session.rollback()
+            logger.error(f"Error deleting card {card_uid}: {e}")
             raise
         finally:
             session.close()

@@ -9,7 +9,7 @@ import sys
 
 from rfid_reception.services.db_service import DatabaseService
 from rfid_reception.services.serial_comm import SerialCommunicationService
-from rfid_reception.reports import ReportsGenerator
+from rfid_reception.reports import ModernReportsGenerator
 from rfid_reception.scheduler import TaskScheduler
 from rfid_reception.gui.main_window import MainWindow
 
@@ -41,6 +41,11 @@ def load_config():
         'backup_dir': 'backups',
         'backup_time': '23:59',
         'report_time': '23:55',
+        # Automated reports scheduling
+        'weekly_day_of_week': 'mon',      # mon..sun
+        'weekly_time': '00:10',           # HH:MM
+        'monthly_day': 1,                 # 1..31
+        'monthly_time': '00:15',          # HH:MM
         'db_path': 'rfid_reception.db'
     }
     
@@ -96,7 +101,11 @@ def main():
             logger.info("You can configure serial connection in Settings")
         
         # Reports generator
-        reports_generator = ReportsGenerator(db_service, output_dir='reports')
+        reports_generator = ModernReportsGenerator(
+            db_service,
+            output_dir='reports',
+            use_arabic=config.get('reports_use_arabic', True)
+        )
         logger.info("Reports generator initialized")
         
         # Scheduler
@@ -108,7 +117,11 @@ def main():
         )
         scheduler.start(
             backup_time=config.get('backup_time', '23:59'),
-            report_time=config.get('report_time', '23:55')
+            report_time=config.get('report_time', '23:55'),
+            weekly_day_of_week=config.get('weekly_day_of_week', 'mon'),
+            weekly_time=config.get('weekly_time', '00:10'),
+            monthly_day=config.get('monthly_day', 1),
+            monthly_time=config.get('monthly_time', '00:15')
         )
         logger.info("Scheduler started")
         
