@@ -2,7 +2,7 @@
 
 import logging
 import shutil
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -66,13 +66,44 @@ class TaskScheduler:
         except Exception as e:
             logger.error(f"Error generating automated daily report: {e}")
     
-    def start(self, backup_time='23:59', report_time='23:55'):
+    def generate_weekly_report_task(self):
+        """Task to generate last week's report (Mon-Sun)."""
+        try:
+            today = datetime.now().date()
+            this_monday = today - timedelta(days=today.weekday())
+            last_monday = this_monday - timedelta(days=7)
+            report_path = self.reports_generator.generate_weekly_report(last_monday)
+            logger.info(f"Automated weekly report generated: {report_path}")
+        except Exception as e:
+            logger.error(f"Error generating automated weekly report: {e}")
+    
+    def generate_monthly_report_task(self):
+        """Task to generate last month's report."""
+        try:
+            now = datetime.now()
+            month = now.month - 1
+            year = now.year
+            if month == 0:
+                month = 12
+                year -= 1
+            report_path = self.reports_generator.generate_monthly_report(month, year)
+            logger.info(f"Automated monthly report generated: {report_path}")
+        except Exception as e:
+            logger.error(f"Error generating automated monthly report: {e}")
+    
+    def start(self, backup_time='23:59', report_time='23:55',
+              weekly_day_of_week='mon', weekly_time='00:10',
+              monthly_day=1, monthly_time='00:15'):
         """
         Start the scheduler with daily tasks.
         
         Args:
             backup_time: Time to run daily backup (HH:MM format)
             report_time: Time to run daily report (HH:MM format)
+            weekly_day_of_week: Day of week to run weekly report (mon..sun)
+            weekly_time: Time to run weekly report (HH:MM)
+            monthly_day: Day of month to run monthly report (1-31)
+            monthly_time: Time to run monthly report (HH:MM)
         """
         if self.is_running:
             logger.warning("Scheduler is already running")
@@ -81,6 +112,8 @@ class TaskScheduler:
         # Parse times
         backup_hour, backup_minute = map(int, backup_time.split(':'))
         report_hour, report_minute = map(int, report_time.split(':'))
+        weekly_hour, weekly_minute = map(int, weekly_time.split(':'))
+        monthly_hour, monthly_minute = map(int, monthly_time.split(':'))
         
         # Schedule daily backup
         self.scheduler.add_job(
@@ -100,9 +133,30 @@ class TaskScheduler:
             replace_existing=True
         )
         
+        # Schedule weekly report
+        self.scheduler.add_job(
+            self.generate_weekly_report_task,
+            trigger=CronTrigger(day_of_week=weekly_day_of_week, hour=weekly_hour, minute=weekly_minute),
+            id='weekly_report',
+            name='Weekly Report Generation',
+            replace_existing=True
+        )
+        
+        # Schedule monthly report
+        self.scheduler.add_job(
+            self.generate_monthly_report_task,
+            trigger=CronTrigger(day=monthly_day, hour=monthly_hour, minute=monthly_minute),
+            id='monthly_report',
+            name='Monthly Report Generation',
+            replace_existing=True
+        )
+        
         self.scheduler.start()
         self.is_running = True
-        logger.info(f"Scheduler started - Backup: {backup_time}, Report: {report_time}")
+        logger.info(
+            f"Scheduler started - Backup: {backup_time}, Daily: {report_time}, "
+            f"Weekly: {weekly_day_of_week} {weekly_time}, Monthly: day {monthly_day} {monthly_time}"
+        )
     
     def stop(self):
         """Stop the scheduler."""

@@ -1,9 +1,9 @@
 """Main GUI window for RFID Reception System with modern design."""
 
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog, simpledialog
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from rfid_reception.reports import ModernReportsGenerator
 
 logger = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ class ModernMainWindow:
         self.root = root
         self.db_service = db_service
         self.serial_service = serial_service
-        self.reports_generator = ModernReportsGenerator(db_service)
+        self.reports_generator = reports_generator
         self.scheduler = scheduler
         self.config = config
 
@@ -338,12 +338,12 @@ class ModernMainWindow:
 
         # Actions list
         actions = [
-            ("📊 View Transactions", self._show_transactions, PRIMARY_COLOR),
-            ("📄 Generate Report", self._generate_report, SECONDARY_COLOR),
             ("🎫 View All Cards", self._show_all_cards, SUCCESS_COLOR),
             ("✏️ Insert Card Manual", self._show_manual_card_insert, WARNING_COLOR),
-            ("📥 Export to PDF", self._export_cards_to_pdf, PRIMARY_COLOR),
-            ("⚙️ Settings", self._show_settings, TEXT_SECONDARY),
+            ("📅 Daily Report", self._generate_daily_report_manual, PRIMARY_COLOR),
+            ("🗓 Weekly Report", self._generate_weekly_report_manual, PRIMARY_COLOR),
+            ("📆 Monthly Report", self._generate_monthly_report_manual, PRIMARY_COLOR),
+            ("📈 Yearly Report", self._generate_yearly_report_manual, SECONDARY_COLOR),
         ]
 
         for i, (text, command, color) in enumerate(actions):
@@ -538,6 +538,135 @@ class ModernMainWindow:
         """Show manual card insert dialog."""
         from rfid_reception.gui.dialogs.manual_card_insert_dialog import ManualCardInsertDialog
         ManualCardInsertDialog(self.root, self.db_service)
+
+    def _generate_daily_report_manual(self):
+        try:
+            date_str = simpledialog.askstring(
+                "Daily Report", "Enter date (YYYY-MM-DD) or leave blank for today:", parent=self.root
+            )
+            # Compute default filename
+            if date_str:
+                try:
+                    d = datetime.strptime(date_str, '%Y-%m-%d').date()
+                except Exception:
+                    messagebox.showerror("Daily Report", "Invalid date format. Use YYYY-MM-DD.")
+                    return
+            else:
+                d = datetime.now().date()
+
+            default_name = f"daily_report_{d.strftime('%Y%m%d')}.pdf"
+            save_path = filedialog.asksaveasfilename(
+                title="Save Daily Report As",
+                defaultextension=".pdf",
+                filetypes=[("PDF files", "*.pdf")],
+                initialfile=default_name,
+                parent=self.root
+            )
+            if not save_path:
+                return
+
+            if date_str:
+                path = self.reports_generator.generate_daily_report(date_str, output_path=save_path)
+            else:
+                path = self.reports_generator.generate_daily_report(output_path=save_path)
+            messagebox.showinfo("Daily Report", f"Generated:\n{path}")
+        except Exception as e:
+            logger.error(f"Daily report error: {e}")
+            messagebox.showerror("Daily Report", str(e))
+
+        
+    def _generate_weekly_report_manual(self):
+        try:
+            week_start = simpledialog.askstring(
+                "Weekly Report",
+                "Enter week start (YYYY-MM-DD, Monday). Leave blank for current week:",
+                parent=self.root
+            )
+            # Determine start/end for default filename
+            if week_start:
+                try:
+                    start = datetime.strptime(week_start, '%Y-%m-%d').date()
+                except Exception:
+                    messagebox.showerror("Weekly Report", "Invalid date format. Use YYYY-MM-DD.")
+                    return
+            else:
+                today = datetime.now().date()
+                start = today - timedelta(days=today.weekday())
+            end = start + timedelta(days=6)
+
+            default_name = f"weekly_report_{start.strftime('%Y%m%d')}_to_{end.strftime('%Y%m%d')}.pdf"
+            save_path = filedialog.asksaveasfilename(
+                title="Save Weekly Report As",
+                defaultextension=".pdf",
+                filetypes=[("PDF files", "*.pdf")],
+                initialfile=default_name,
+                parent=self.root
+            )
+            if not save_path:
+                return
+
+            if week_start:
+                path = self.reports_generator.generate_weekly_report(week_start, output_path=save_path)
+            else:
+                path = self.reports_generator.generate_weekly_report(output_path=save_path)
+            messagebox.showinfo("Weekly Report", f"Generated:\n{path}")
+        except Exception as e:
+            logger.error(f"Weekly report error: {e}")
+            messagebox.showerror("Weekly Report", str(e))
+
+    def _generate_monthly_report_manual(self):
+        try:
+            m = simpledialog.askinteger(
+                "Monthly Report", "Enter month (1-12):", initialvalue=datetime.now().month,
+                minvalue=1, maxvalue=12, parent=self.root
+            )
+            y = simpledialog.askinteger(
+                "Monthly Report", "Enter year:", initialvalue=datetime.now().year,
+                minvalue=2000, maxvalue=2100, parent=self.root
+            )
+            if not m:
+                m = datetime.now().month
+            if not y:
+                y = datetime.now().year
+            default_name = f"monthly_report_{y}{m:02d}.pdf"
+            save_path = filedialog.asksaveasfilename(
+                title="Save Monthly Report As",
+                defaultextension=".pdf",
+                filetypes=[("PDF files", "*.pdf")],
+                initialfile=default_name,
+                parent=self.root
+            )
+            if not save_path:
+                return
+            path = self.reports_generator.generate_monthly_report(m, y, output_path=save_path)
+            messagebox.showinfo("Monthly Report", f"Generated:\n{path}")
+        except Exception as e:
+            logger.error(f"Monthly report error: {e}")
+            messagebox.showerror("Monthly Report", str(e))
+
+    def _generate_yearly_report_manual(self):
+        try:
+            y = simpledialog.askinteger(
+                "Yearly Report", "Enter year (blank for current):", initialvalue=datetime.now().year,
+                minvalue=2000, maxvalue=2100, parent=self.root
+            )
+            if not y:
+                y = datetime.now().year
+            default_name = f"yearly_report_{y}.pdf"
+            save_path = filedialog.asksaveasfilename(
+                title="Save Yearly Report As",
+                defaultextension=".pdf",
+                filetypes=[("PDF files", "*.pdf")],
+                initialfile=default_name,
+                parent=self.root
+            )
+            if not save_path:
+                return
+            path = self.reports_generator.generate_yearly_report(y, output_path=save_path)
+            messagebox.showinfo("Yearly Report", f"Generated:\n{path}")
+        except Exception as e:
+            logger.error(f"Yearly report error: {e}")
+            messagebox.showerror("Yearly Report", str(e))
 
     def _export_cards_to_pdf(self):
         """Export cards to PDF."""

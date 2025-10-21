@@ -90,7 +90,7 @@ class ArabicTextHelper:
     
     # Arabic translations (omitted for brevity)
     TRANSLATIONS = {
-        "Daily Report": "تقرير يومي", "Weekly Report": "تقرير أسبوعي", "Monthly Report": "تقرير شهري", "Custom Report": "تقرير مخصص", "Selected Cards Report": "تقرير البطاقات المختارة",
+        "Daily Report": "تقرير يومي", "Weekly Report": "تقرير أسبوعي", "Monthly Report": "تقرير شهري", "Yearly Report": "تقرير سنوي", "Custom Report": "تقرير مخصص", "Selected Cards Report": "تقرير البطاقات المختارة",
         "Period": "الفترة الزمنية", "Key Metrics": "المقاييس الرئيسية", "Transactions": "المعاملات", "Analytics": "التحليلات", "Card Information": "معلومات البطاقة", "Transaction History": "سجل المعاملات",
         "ID": "الرقم", "Card UID": "معرف البطاقة", "Type": "النوع", "Amount (EGP)": "المبلغ (جنيه)", "Balance (EGP)": "الرصيد (جنيه)", "Balance After (EGP)": "الرصيد بعد (جنيه)", "Employee": "الموظف", 
         "Timestamp": "التاريخ والوقت", "Created": "تاريخ الإنشاء", "Last Top-up": "آخر شحن", "Notes": "ملاحظات", "Transaction Count": "عدد المعاملات", "Metric": "المقياس", "Value": "القيمة", 
@@ -546,12 +546,22 @@ class ModernReportsGenerator:
         
         font_name = self.arabic_font if self.use_arabic else 'Helvetica'
         font_name_bold = f"{font_name}-Bold" if self.use_arabic else 'Helvetica-Bold'
+        styles = getSampleStyleSheet()
+        header_par_style = ParagraphStyle('TblHeader', parent=styles['Normal'], fontName=font_name_bold, fontSize=9, alignment=TA_RIGHT if self.use_arabic else TA_CENTER)
+        body_par_style = ParagraphStyle('TblBody', parent=styles['Normal'], fontName=font_name, fontSize=8, alignment=TA_RIGHT if self.use_arabic else TA_LEFT)
         
         # Table data
-        table_data_raw = [
-            [self._translate('ID'), self._translate('Card UID'), self._translate('Type'), self._translate('Amount (EGP)'),
-             self._translate('Balance After (EGP)'), self._translate('Employee'), self._translate('Timestamp'), self._translate('Notes')]
+        header_row = [
+            self._bidi_process(self._translate('ID')),
+            self._bidi_process(self._translate('Card UID')),
+            self._bidi_process(self._translate('Type')),
+            self._bidi_process(self._translate('Amount (EGP)')),
+            self._bidi_process(self._translate('Balance After (EGP)')),
+            self._bidi_process(self._translate('Employee')),
+            self._bidi_process(self._translate('Timestamp')),
+            self._bidi_process(self._translate('Notes')),
         ]
+        table_data_raw = [header_row]
         
         for i, t in enumerate(transactions):
             tx_type = self._translate('TOP-UP') if t['type'] == 'topup' else self._translate('READ')
@@ -574,7 +584,7 @@ class ModernReportsGenerator:
         total_amount = sum(t['amount'] for t in transactions if t['type'] == 'topup')
         total_formatted = ArabicTextHelper.format_currency_arabic(total_amount) if self.use_arabic else f"{total_amount:.2f}"
         total_row = [
-            '', '', f"<b>{self._bidi_process(self._translate('TOTAL'))}</b>", f"<b>{self._bidi_process(total_formatted)}</b>", '', '', '', ''
+            '', '', self._bidi_process(self._translate('TOTAL')), self._bidi_process(total_formatted), '', '', '', ''
         ]
         table_data_raw.append(total_row)
         
@@ -587,6 +597,14 @@ class ModernReportsGenerator:
             table_data = table_data_raw
             header_align = 'CENTER'; content_align_left = 'LEFT'; content_align_right = 'RIGHT'
             total_text_col = 2; total_value_col = 3
+        
+        # Convert to Paragraphs for reliable Arabic shaping in table cells
+        if self.use_arabic:
+            table_data_par = []
+            for r_idx, row in enumerate(table_data):
+                style = header_par_style if r_idx == 0 else body_par_style
+                table_data_par.append([Paragraph(str(cell), style) for cell in row])
+            table_data = table_data_par
         
         col_widths = [0.5*inch, 1.2*inch, 0.8*inch, 1*inch, 1*inch, 1*inch, 1.2*inch, 1.3*inch]
         table = Table(table_data, colWidths=col_widths)
@@ -615,14 +633,16 @@ class ModernReportsGenerator:
         return self.output_dir / filename
     
     def _generate_pdf(self, filename: str, elements: List, 
-                     landscape_mode: bool = False) -> str:
+                     landscape_mode: bool = False, save_to: Optional[str] = None) -> str:
         """Generate modern PDF document."""
         if not HAS_REPORTLAB:
             raise ImportError("reportlab is required for PDF generation. Install it with: pip install reportlab")
         
-        filepath = self.output_dir / filename
+        filepath = Path(save_to) if save_to else (self.output_dir / filename)
         
         try:
+            # Ensure directory exists
+            filepath.parent.mkdir(parents=True, exist_ok=True)
             pagesize = landscape(A4) if landscape_mode else A4
             doc = SimpleDocTemplate(
                 str(filepath), pagesize=pagesize, rightMargin=0.5 * inch, leftMargin=0.5 * inch, 
@@ -641,10 +661,128 @@ class ModernReportsGenerator:
             logger.error(f"Error generating PDF report: {e}")
             raise
 
-    def generate_daily_report(self, date: Optional[datetime] = None) -> str:
+    def generate_report(self, report_type: str, transactions: List[Dict], period: str,
+                        identifier: str = '', landscape_mode: bool = False,
+                        output_path: Optional[str] = None) -> str:
+        """A consolidated PDF generator for standard report types (daily/weekly/monthly/custom)."""
+        stats = self._calculate_statistics(transactions)
+        elements = self._create_modern_cover_page(report_type, period, stats)
+        elements.append(PageBreak())
+
+        # Transactions section
+        styles = getSampleStyleSheet()
+        tx_title_style = ParagraphStyle(
+            'TxTitle', parent=styles['Heading2'], fontSize=16, textColor=self.PRIMARY_COLOR,
+            spaceAfter=12, fontName=f"{self.arabic_font}-Bold" if self.use_arabic else 'Helvetica-Bold'
+        )
+        elements.append(Paragraph(self._bidi_process(self._translate("Transactions")), tx_title_style))
+        elements.append(Spacer(1, 0.15 * inch))
+        elements.append(self._create_modern_transactions_table(transactions))
+
+        # Charts section
+        if HAS_MATPLOTLIB and transactions:
+            elements.append(PageBreak())
+            analytics_style = ParagraphStyle(
+                'AnalyticsTitle', parent=styles['Heading2'], fontSize=16, textColor=self.PRIMARY_COLOR,
+                spaceAfter=12, fontName=f"{self.arabic_font}-Bold" if self.use_arabic else 'Helvetica-Bold'
+            )
+            elements.append(Paragraph(self._bidi_process(self._translate("Analytics")), analytics_style))
+            elements.append(Spacer(1, 0.15 * inch))
+
+            # Pie Chart
+            pie_chart = self.chart_generator.generate_transaction_pie_chart(transactions, use_arabic=self.use_arabic)
+            if pie_chart:
+                elements.append(Image(pie_chart, width=4*inch, height=4*inch))
+                elements.append(Spacer(1, 0.2 * inch))
+
+            # Bar Chart
+            bar_chart = self.chart_generator.generate_daily_amount_chart(transactions, width=7, height=4, use_arabic=self.use_arabic)
+            if bar_chart:
+                elements.append(Image(bar_chart, width=7*inch, height=4*inch))
+
+        pdf_path = self._get_report_filename(report_type.lower().replace(' ', '_'), identifier)
+        return self._generate_pdf(pdf_path.name, elements, landscape_mode=landscape_mode, save_to=output_path)
+
+    def generate_daily_report(self, date: Optional[datetime] = None, output_path: Optional[str] = None) -> str:
         """Generate modern daily PDF report."""
-        # Full method body implementation
-        return ""
+        date = date or datetime.now().date()
+        if isinstance(date, str):
+            date = datetime.strptime(date, '%Y-%m-%d').date()
+
+        start_date = datetime.combine(date, datetime.min.time())
+        end_date = datetime.combine(date, datetime.max.time())
+
+        transactions = (self.db_service.get_transactions(start_date=start_date, end_date=end_date)
+                        if hasattr(self.db_service, 'get_transactions') else [])
+        period = date.strftime('%Y-%m-%d')
+        identifier = date.strftime('%Y%m%d')
+        return self.generate_report('Daily Report', transactions, period, identifier, output_path=output_path)
+
+    def generate_weekly_report(self, week_start: Optional[datetime] = None, output_path: Optional[str] = None) -> str:
+        """Generate modern weekly PDF report."""
+        if week_start is None:
+            today = datetime.now().date()
+            week_start = today - timedelta(days=today.weekday())
+        elif isinstance(week_start, str):
+            week_start = datetime.strptime(week_start, '%Y-%m-%d').date()
+
+        week_end = week_start + timedelta(days=6)
+        start_date = datetime.combine(week_start, datetime.min.time())
+        end_date = datetime.combine(week_end, datetime.max.time())
+
+        transactions = (self.db_service.get_transactions(start_date=start_date, end_date=end_date)
+                        if hasattr(self.db_service, 'get_transactions') else [])
+        period = f"{week_start.strftime('%Y-%m-%d')} to {week_end.strftime('%Y-%m-%d')}"
+        identifier = week_start.strftime('%Y%m%d')
+        return self.generate_report('Weekly Report', transactions, period, identifier, landscape_mode=True, output_path=output_path)
+
+    def generate_monthly_report(self, month: Optional[int] = None, year: Optional[int] = None, output_path: Optional[str] = None) -> str:
+        """Generate modern monthly PDF report."""
+        now = datetime.now()
+        month = month or now.month
+        year = year or now.year
+
+        start_date = datetime(year, month, 1)
+        # Compute last day of month
+        end_date = datetime(year, month % 12 + 1, 1) - timedelta(seconds=1) if month < 12 else datetime(year + 1, 1, 1) - timedelta(seconds=1)
+
+        transactions = (self.db_service.get_transactions(start_date=start_date, end_date=end_date)
+                        if hasattr(self.db_service, 'get_transactions') else [])
+        period = start_date.strftime('%B %Y')
+        identifier = f"{year}{month:02d}"
+        return self.generate_report('Monthly Report', transactions, period, identifier, landscape_mode=True, output_path=output_path)
+
+    def generate_yearly_report(self, year: Optional[int] = None, output_path: Optional[str] = None) -> str:
+        """Generate modern yearly PDF report."""
+        now = datetime.now()
+        year = year or now.year
+        start_date = datetime(year, 1, 1)
+        end_date = datetime(year + 1, 1, 1) - timedelta(seconds=1)
+        transactions = (self.db_service.get_transactions(start_date=start_date, end_date=end_date)
+                        if hasattr(self.db_service, 'get_transactions') else [])
+        period = f"{year}"
+        identifier = f"{year}"
+        return self.generate_report('Yearly Report', transactions, period, identifier, landscape_mode=True, output_path=output_path)
+
+    def generate_custom_report(self, start_date: datetime, end_date: datetime, card_uid: Optional[str] = None, output_path: Optional[str] = None) -> str:
+        """Generate modern custom date range report."""
+        if isinstance(start_date, str):
+            start_date = datetime.strptime(start_date, '%Y-%m-%d')
+        if isinstance(end_date, str):
+            end_date = datetime.strptime(end_date, '%Y-%m-%d')
+
+        transactions = (self.db_service.get_transactions(start_date=start_date, end_date=end_date, card_uid=card_uid)
+                        if hasattr(self.db_service, 'get_transactions') else [])
+
+        period_str = f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}"
+        if card_uid:
+            period_str += f" ({self._translate('Card UID')}: {card_uid[:16]}...)"
+
+        identifier = f"{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}"
+        if card_uid:
+            identifier += f"_{card_uid[:8]}"
+
+        return self.generate_report('Custom Report', transactions, period_str, identifier, landscape_mode=True, output_path=output_path)
 
     def generate_beautiful_arabic_report(self, cards: List[Dict], output_path: Optional[str] = None) -> str:
         """
