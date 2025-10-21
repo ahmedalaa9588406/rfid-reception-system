@@ -499,13 +499,15 @@ class ModernReportsGenerator:
         elements.append(Paragraph(report_title_proc, title_style))
         elements.append(Spacer(1, 0.15 * inch))
         
-        # Period
-        period_label = self._bidi_process(self._translate('Period'))
-        period_proc = self._bidi_process(period)
-        elements.append(Paragraph(
-            f"<font color='{self.MEDIUM_TEXT.hexval()}' fontName='{font_name_bold}'>{period_label}:</font> <font fontName='{font_name}'>{period_proc}</font>",
-            meta_style
-        ))
+        # Removed: Generated date first
+        # gen_date = ArabicTextHelper.format_date_arabic(datetime.now()) if self.use_arabic else datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        # gen_text = self._bidi_process(f"{self._translate('Generated on')} {gen_date}")
+        # elements.append(Paragraph(f"<font color='#999999' size=8 fontName='{font_name}'>{gen_text}</font>", meta_style))
+        
+        # Removed: Period after
+        # period_label = self._bidi_process(self._translate('Period'))
+        # elements.append(Paragraph(f"<font color='{self.MEDIUM_TEXT.hexval()}' fontName='{font_name_bold}'>{period_label}:</font> <font fontName='{font_name}'>{self._bidi_process(period)}</font>", meta_style))
+        
         elements.append(Spacer(1, 0.3 * inch))
         
         # Key metrics section
@@ -555,13 +557,8 @@ class ModernReportsGenerator:
         elements.append(stats_table)
         elements.append(Spacer(1, 0.4 * inch))
         
-        # Generation info
-        gen_date = ArabicTextHelper.format_date_arabic_dmy(datetime.now(), include_time=True) if self.use_arabic else datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        gen_text = self._bidi_process(f"{self._translate('Generated on')} {gen_date}")
-        elements.append(Paragraph(
-            f"<font color='#999999' size=8 fontName='{font_name}'>{gen_text}</font>",
-            meta_style
-        ))
+        # Removed: Original gen_date paragraph at the end
+        # elements.append(Paragraph(f"<font color='#999999' size=8 fontName='{font_name}'>{gen_text}</font>", meta_style))
         
         return elements
     
