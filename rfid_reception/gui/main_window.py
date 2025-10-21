@@ -3,6 +3,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 import logging
+import os
 from datetime import datetime, timedelta
 from rfid_reception.reports import ModernReportsGenerator
 
@@ -37,6 +38,15 @@ class ModernMainWindow:
         self.root.geometry("1100x750")
         self.root.minsize(900, 600)
         self.root.configure(bg=LIGHT_BG)
+
+        # Set application icon
+        try:
+            icon_path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'images', 'images.ico')
+            self.icon = tk.PhotoImage(file=icon_path)
+            self.root.iconphoto(True, self.icon)
+        except tk.TclError:
+            # Icon file not found, continue without icon
+            pass
 
         self.current_card_uid = None
         self.current_balance = 0.0

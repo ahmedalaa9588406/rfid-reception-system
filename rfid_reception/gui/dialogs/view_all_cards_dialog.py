@@ -105,19 +105,40 @@ class ArabicTextHelper:
     
     @classmethod
     def to_arabic_numerals(cls, number: int) -> str:
-        western = str(number); arabic = ""
+        """Convert Western numerals to Arabic numerals."""
+        western = str(number)
+        arabic = ""
         for char in western:
-            if char.isdigit(): arabic += cls.ARABIC_NUMERALS[int(char)]
-            else: arabic += char
+            if char.isdigit():
+                arabic += cls.ARABIC_NUMERALS[int(char)]
+            else:
+                arabic += char
         return arabic
     
     @classmethod
     def format_date_arabic(cls, dt: Optional[datetime]) -> str:
-        if not dt: return cls.translate("N/A")
+        if not dt: 
+            return cls.translate("N/A")
+        
         try:
-            year = cls.to_arabic_numerals(dt.year); month = cls.to_arabic_numerals(dt.month); day = cls.to_arabic_numerals(dt.day)
-            hour = cls.to_arabic_numerals(dt.hour); minute = cls.to_arabic_numerals(dt.minute); second = cls.to_arabic_numerals(dt.second)
-            return f"{year}-{month}-{day} {hour}:{minute}:{second}"
+            # Arabic month names
+            arabic_months = [
+                "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+                "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"
+            ]
+            
+            # Get date components and convert to Arabic numerals
+            day = cls.to_arabic_numerals(dt.day)
+            month_name = arabic_months[dt.month - 1]
+            year = cls.to_arabic_numerals(dt.year)
+            
+            # Format time in 24-hour format with Arabic numerals
+            hour = cls.to_arabic_numerals(dt.hour)
+            minute = cls.to_arabic_numerals(dt.minute).zfill(2)
+            
+            # Format: ٢١ أكتوبر ٢٠٢٥ - ١٤:٣٠
+            return f"{day} {month_name} {year} - {hour}:{minute}"
+            
         except Exception as e:
             logger.warning(f"Error formatting date in Arabic: {e}")
             return dt.strftime('%Y-%m-%d %H:%M:%S')
@@ -367,13 +388,14 @@ class ModernReportsGenerator:
         total_amount_str = f"EGP {ArabicTextHelper.format_currency_arabic(stats['total_amount'])}" if self.use_arabic else f"EGP {stats['total_amount']:.2f}"
         avg_transaction_str = f"EGP {ArabicTextHelper.format_currency_arabic(stats['avg_transaction'])}" if self.use_arabic else f"EGP {stats['avg_transaction']:.2f}"
                                
+        # Reversed: Value column first, then Metric column
         stats_data = [
-            [self._bidi_process(self._translate('Metric')), self._bidi_process(self._translate('Value'))],
-            [self._bidi_process(self._translate('Total Transactions')), self._bidi_process(ArabicTextHelper.to_arabic_numerals(stats['total_transactions']) if self.use_arabic else str(stats['total_transactions']))],
-            [self._bidi_process(self._translate('Top-ups')), self._bidi_process(f"{ArabicTextHelper.to_arabic_numerals(stats['topup_count']) if self.use_arabic else stats['topup_count']} (EGP {stats['total_topup_amount']:.2f})")],
-            [self._bidi_process(self._translate('Reads')), self._bidi_process(f"{ArabicTextHelper.to_arabic_numerals(stats['read_count']) if self.use_arabic else stats['read_count']} (EGP {stats['total_read_amount']:.2f})")],
-            [self._bidi_process(self._translate('Total Amount')), self._bidi_process(total_amount_str)],
-            [self._bidi_process(self._translate('Average Transaction')), self._bidi_process(avg_transaction_str)]
+            [self._bidi_process(self._translate('Value')), self._bidi_process(self._translate('Metric'))],
+            [self._bidi_process(ArabicTextHelper.to_arabic_numerals(stats['total_transactions']) if self.use_arabic else str(stats['total_transactions'])), self._bidi_process(self._translate('Total Transactions'))],
+            [self._bidi_process(f"{ArabicTextHelper.to_arabic_numerals(stats['topup_count']) if self.use_arabic else stats['topup_count']} (EGP {stats['total_topup_amount']:.2f})"), self._bidi_process(self._translate('Top-ups'))],
+            [self._bidi_process(f"{ArabicTextHelper.to_arabic_numerals(stats['read_count']) if self.use_arabic else stats['read_count']} (EGP {stats['total_read_amount']:.2f})"), self._bidi_process(self._translate('Reads'))],
+            [self._bidi_process(total_amount_str), self._bidi_process(self._translate('Total Amount'))],
+            [self._bidi_process(avg_transaction_str), self._bidi_process(self._translate('Average Transaction'))]
         ]
         
         if self.use_arabic:
@@ -381,7 +403,7 @@ class ModernReportsGenerator:
         else:
             col_align_left = 'LEFT'; col_align_right = 'RIGHT'
         
-        stats_table = Table(stats_data, colWidths=[3 * inch, 2.5 * inch])
+        stats_table = Table(stats_data, colWidths=[2.5 * inch, 3 * inch])
         stats_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), self.PRIMARY_COLOR), ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, 0), 'CENTER'), ('FONTNAME', (0, 0), (-1, 0), font_name_bold), ('FONTSIZE', (0, 0), (-1, 0), 12),
@@ -615,7 +637,7 @@ class ModernReportsGenerator:
         title_style = ParagraphStyle('ArabicTitle', parent=styles['Title'], fontName=font_name_bold, fontSize=28, leading=34, alignment=TA_RIGHT, textColor=self.PRIMARY_COLOR, spaceAfter=20)
         subtitle_style = ParagraphStyle('ArabicSubtitle', parent=styles['Heading2'], fontName=font_name_bold, fontSize=18, leading=22, alignment=TA_RIGHT, textColor=self.SECONDARY_COLOR, spaceAfter=12)
         heading_style = ParagraphStyle('ArabicHeading', parent=styles['Heading3'], fontName=font_name_bold, fontSize=14, leading=18, alignment=TA_RIGHT, textColor=self.PRIMARY_COLOR, spaceAfter=8)
-        body_rtl_style = ParagraphStyle('ArabicBody', parent=styles['Normal'], fontName=font_name, fontSize=10, leading=14, alignment=TA_RIGHT, spaceAfter=8)
+        body_rtl_style = ParagraphStyle('ArabicBody', parent=styles['Normal'], fontName=font_name, fontSize=10, leading=14, alignment=TA_RIGHT, spaceAfter=8, wordWrap='RTL')
         
         elements = []
         elements.append(Spacer(1, 1 * inch))
@@ -623,55 +645,141 @@ class ModernReportsGenerator:
         elements.append(Paragraph(self._bidi_process("نظام إدارة البطاقات الذكية"), subtitle_style))
         elements.append(Spacer(1, 0.5 * inch))
         
-        date_str = ArabicTextHelper.format_date_arabic(datetime.now())
-        elements.append(Paragraph(self._bidi_process(f"تم إنشاؤه في: {date_str}"), body_rtl_style))
+        # Format current date in Arabic
+        current_date = datetime.now()
+        date_str = ArabicTextHelper.format_date_arabic(current_date)
+        elements.append(Paragraph(f"<para align='right'>{self._bidi_process('تم إنشاؤه في:')} {date_str}</para>", body_rtl_style))
         elements.append(Spacer(1, 0.3 * inch))
         
+        # Add statistics section
         elements.append(Paragraph(self._bidi_process("الإحصائيات الرئيسية"), heading_style))
-        stats_data_raw = [
-            ["المؤشر", "القيمة"],  ["إجمالي البطاقات", ArabicTextHelper.to_arabic_numerals(total_cards)],
-            ["إجمالي الرصيد", ArabicTextHelper.format_currency_arabic(total_balance) + " جنيه"],
-            ["متوسط الرصيد", ArabicTextHelper.format_currency_arabic(avg_balance) + " جنيه"],
-            ["إجمالي المعاملات", ArabicTextHelper.to_arabic_numerals(total_transactions)],
+        
+        # Create statistics data with proper RTL formatting
+        stats_data = [
+            [self._bidi_process("القيمة"), self._bidi_process("المؤشر")],
+            [self._bidi_process(ArabicTextHelper.to_arabic_numerals(total_cards)), self._bidi_process("إجمالي البطاقات")],
+            [self._bidi_process(f"{ArabicTextHelper.format_currency_arabic(total_balance)} جنيه"), self._bidi_process("إجمالي الرصيد")],
+            [self._bidi_process(f"{ArabicTextHelper.format_currency_arabic(avg_balance)} جنيه"), self._bidi_process("متوسط الرصيد")],
+            [self._bidi_process(ArabicTextHelper.to_arabic_numerals(total_transactions)), self._bidi_process("إجمالي المعاملات")],
         ]
         
-        stats_data = [ [self._bidi_process(row[1]), self._bidi_process(row[0])] for row in stats_data_raw ]
+        # Create and style the statistics table
         stats_table = Table(stats_data, colWidths=[2.5*inch, 3*inch])
         stats_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (1, 0), self.PRIMARY_COLOR), ('FONTNAME', (0, 0), (1, 0), font_name_bold), ('ALIGN', (0, 0), (1, 0), 'CENTER'),
-            ('FONTNAME', (0, 1), (1, -1), font_name), ('ALIGN', (0, 0), (0, -1), 'RIGHT'),  ('ALIGN', (1, 0), (1, -1), 'RIGHT'), 
-            ('GRID', (0, 0), (1, -1), 0.5, colors.grey), ('ROWBACKGROUNDS', (0, 1), (1, -1), [self.LIGHT_BG, colors.white]),
+            ('BACKGROUND', (0, 0), (1, 0), self.PRIMARY_COLOR), 
+            ('TEXTCOLOR', (0, 0), (1, 0), colors.white),
+            ('FONTNAME', (0, 0), (1, -1), font_name), 
+            ('FONTNAME', (0, 0), (1, 0), font_name_bold),  # Bold header
+            ('ALIGN', (0, 0), (1, -1), 'RIGHT'),
+            ('GRID', (0, 0), (1, -1), 0.5, colors.grey), 
+            ('ROWBACKGROUNDS', (0, 1), (1, -1), [self.LIGHT_BG, colors.white]),
         ]))
         
-        elements.append(stats_table); elements.append(PageBreak())
-        elements.append(Paragraph(self._bidi_process("قائمة البطاقات"), heading_style)); elements.append(Spacer(1, 0.2 * inch))
+        elements.append(stats_table)
+        elements.append(PageBreak())
         
-        cards_data_raw = [["معرّف البطاقة", "تاريخ الإنشاء", "آخر شحن", "الرصيد (جنيه)"]]
-        for card in sorted(cards, key=lambda x: x.get('balance', 0), reverse=True): 
+        # Add cards list section
+        elements.append(Paragraph(self._bidi_process("قائمة البطاقات"), heading_style))
+        elements.append(Spacer(1, 0.2 * inch))
+        
+        # Prepare table data with RTL processing
+        cards_data = []
+        
+        # Add header row with RTL processing
+        header_row = [
+            self._bidi_process("الرصيد (جنيه)"),
+            self._bidi_process("آخر شحن"),
+            self._bidi_process("تاريخ الإنشاء"),
+            self._bidi_process("معرّف البطاقة")
+        ]
+        cards_data.append(header_row)
+        
+        # Add data rows with proper RTL processing
+        for card in sorted(cards, key=lambda x: x.get('balance', 0), reverse=True):
             card_uid = card.get('card_uid', 'N/A')
-            created = ArabicTextHelper.format_date_arabic(card.get('created_at')) if card.get('created_at') else 'غير متاح'
-            last_topup = ArabicTextHelper.format_date_arabic(card.get('last_topped_at')) if card.get('last_topped_at') else 'غير متاح'
-            balance = ArabicTextHelper.format_currency_arabic(card.get('balance', 0))
-            cards_data_raw.append([card_uid, created, last_topup, balance])
+            
+            # Format dates with RTL processing
+            created = card.get('created_at')
+            created_str = self._bidi_process(ArabicTextHelper.format_date_arabic(created)) if created else self._bidi_process('غير متاح')
+            
+            last_topup = card.get('last_topped_at')
+            last_topup_str = self._bidi_process(ArabicTextHelper.format_date_arabic(last_topup)) if last_topup else self._bidi_process('غير متاح')
+            
+            balance = self._bidi_process(ArabicTextHelper.format_currency_arabic(card.get('balance', 0)))
+            
+            # Add row with proper RTL order (reversed from English order)
+            cards_data.append([
+                balance,
+                last_topup_str,
+                created_str,
+                self._bidi_process(card_uid)
+            ])
         
-        cards_data = [ [self._bidi_process(item) for item in row[::-1]] for row in cards_data_raw ]
+        # Calculate column widths based on content
+        col_widths = [
+            1.2 * inch,  # Balance
+            2.0 * inch,  # Last top-up
+            2.0 * inch,  # Created at
+            1.5 * inch   # Card UID
+        ]
         
-        cards_table = Table(cards_data, repeatRows=1)
+        # Create and style the cards table
+        cards_table = Table(cards_data, colWidths=col_widths, repeatRows=1)
         cards_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), self.PRIMARY_COLOR), ('FONTNAME', (0, 0), (-1, 0), font_name_bold), ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-            ('FONTNAME', (0, 1), (-1, -1), font_name), ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey), ('ROWBACKGROUNDS', (0, 1), (-1, -1), [self.LIGHT_BG, colors.white]),
+            # Header row styling
+            ('BACKGROUND', (0, 0), (-1, 0), self.PRIMARY_COLOR),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTNAME', (0, 0), (-1, 0), font_name_bold),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            
+            # Data rows styling
+            ('FONTNAME', (0, 1), (-1, -1), font_name),
+            ('ALIGN', (0, 1), (-1, -1), 'RIGHT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            
+            # Grid and alternating row colors
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, self.LIGHT_BG]),
+            
+            # Cell padding
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
         ]))
         
         elements.append(cards_table)
         
+        # Create the PDF document with proper RTL settings
         doc = SimpleDocTemplate(
-            str(filepath), pagesize=A4, rightMargin=0.8 * inch, leftMargin=0.8 * inch, topMargin=0.8 * inch, bottomMargin=0.8 * inch,
+            str(filepath),
+            pagesize=A4,
+            rightMargin=0.8 * inch,
+            leftMargin=0.8 * inch,
+            topMargin=0.8 * inch,
+            bottomMargin=0.8 * inch,
+            initialFontName=font_name,
+            initialFontSize=10,
+            title=self._bidi_process("تقرير البطاقات"),
+            author=self._bidi_process("نظام إدارة البطاقات"),
+            subject=self._bidi_process("تقرير شامل عن البطاقات"),
+            creator=self._bidi_process("نظام إدارة البطاقات الذكية"),
+            encoding='utf-8'
         )
-        header_footer = ModernPDFHeaderFooter('نظام إدارة البطاقات الذكية', use_arabic=True, id='arabic_template')
+        
+        # Add RTL page template
+        header_footer = ModernPDFHeaderFooter(
+            self._bidi_process("نظام إدارة البطاقات"),
+            use_arabic=True,
+            id='arabic_template'
+        )
         doc.addPageTemplates([header_footer])
+        
+        # Build the PDF document
         doc.build(elements)
         
+        # Restore original language setting
         self.use_arabic = original_setting
         logger.info(f"Beautiful Arabic report generated: {filepath}")
         return str(filepath)
@@ -939,10 +1047,11 @@ class ViewAllCardsDialog(tk.Toplevel):
             uid = card.get('card_uid', 'N/A')
             balance = card.get('balance', 0)
             employee = card.get('employee_name', 'N/A')
-            created = card.get('created_at', 'N/A')
-            created_str = created.strftime('%Y-%m-%d') if created else 'N/A'
-            last_topup = card.get('last_topped_at', 'N/A')
-            last_topup_str = last_topup.strftime('%Y-%m-%d') if last_topup else 'Never'
+            # Format dates in Arabic
+            created = card.get('created_at', None)
+            created_str = ArabicTextHelper.format_date_arabic(created) if created else 'N/A'
+            last_topup = card.get('last_topped_at', None)
+            last_topup_str = ArabicTextHelper.format_date_arabic(last_topup) if last_topup else 'Never'
             
             # Determine status
             status = "✓ Active" if balance > 0 else "⚠ Empty"
