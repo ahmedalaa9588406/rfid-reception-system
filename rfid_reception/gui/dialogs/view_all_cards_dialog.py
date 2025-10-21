@@ -144,6 +144,32 @@ class ArabicTextHelper:
             return dt.strftime('%Y-%m-%d %H:%M:%S')
     
     @classmethod
+    def format_date_arabic_dmy(cls, dt: Optional[datetime], include_time: bool = True) -> str:
+        """Format date as 'time - day month year' in Arabic (UI table)."""
+        if not dt:
+            return cls.translate("N/A")
+        try:
+            # Arabic month names
+            arabic_months = [
+                "يناير","فبراير","مارس","أبريل","مايو","يونيو",
+                "يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"
+            ]
+            # ensure datetime instance
+            if isinstance(dt, str):
+                dt = datetime.fromisoformat(dt)
+            # numerals
+            day = cls.to_arabic_numerals(dt.day)
+            month = arabic_months[dt.month-1]
+            year = cls.to_arabic_numerals(dt.year)
+            if include_time:
+                hour = cls.to_arabic_numerals(dt.hour)
+                minute = cls.to_arabic_numerals(dt.minute).zfill(2)
+                return f"{hour}:{minute} - {day} {month} {year}"
+            return f"{day} {month} {year}"
+        except Exception:
+            return cls.translate("N/A")
+    
+    @classmethod
     def format_currency_arabic(cls, amount: float) -> str:
         try:
             formatted = f"{amount:,.2f}"; arabic = ""
@@ -1011,7 +1037,7 @@ class ViewAllCardsDialog(tk.Toplevel):
         scrollbar = ttk.Scrollbar(table_frame)
         scrollbar.pack(side='right', fill='y')
         
-        columns = ("UID", "Balance", "Employee", "Created At", "Last Top-Up", "Status")
+        columns = ("UID", "Balance", "Employee", "Status")  # Removed "Created At" and "Last Top-Up"
         self.tree = ttk.Treeview(table_frame, 
                                 columns=columns,
                                 show='headings',
@@ -1021,8 +1047,8 @@ class ViewAllCardsDialog(tk.Toplevel):
         scrollbar.config(command=self.tree.yview)
         
         # Configure columns
-        col_widths = [140, 110, 130, 120, 120, 80]
-        col_anchors = ['w', 'center', 'w', 'center', 'center', 'center']
+        col_widths = [140, 110, 130, 80]  # Adjusted for 4 columns
+        col_anchors = ['w', 'center', 'w', 'center']  # Adjusted for 4 columns
         
         for i, (col, width, anchor) in enumerate(zip(columns, col_widths, col_anchors)):
             self.tree.heading(col, text=col)
@@ -1047,11 +1073,6 @@ class ViewAllCardsDialog(tk.Toplevel):
             uid = card.get('card_uid', 'N/A')
             balance = card.get('balance', 0)
             employee = card.get('employee_name', 'N/A')
-            # Format dates in Arabic
-            created = card.get('created_at', None)
-            created_str = ArabicTextHelper.format_date_arabic(created) if created else 'N/A'
-            last_topup = card.get('last_topped_at', None)
-            last_topup_str = ArabicTextHelper.format_date_arabic(last_topup) if last_topup else 'Never'
             
             # Determine status
             status = "✓ Active" if balance > 0 else "⚠ Empty"
@@ -1060,10 +1081,8 @@ class ViewAllCardsDialog(tk.Toplevel):
                 uid[:12] + '...' if len(uid) > 12 else uid,
                 f"EGP {balance:.2f}",
                 employee if employee != 'N/A' else 'N/A',
-                created_str,
-                last_topup_str,
                 status
-            )
+            )  # Removed created_str and last_topup_str
             
             tag = 'evenrow' if i % 2 == 0 else 'oddrow'
             self.tree.insert('', 'end', values=values, tags=(tag, 'positive' if balance > 0 else ''))
