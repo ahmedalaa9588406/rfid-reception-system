@@ -87,6 +87,10 @@ class ArabicTextHelper:
     
     ARABIC_NUMERALS = '٠١٢٣٤٥٦٧٨٩'
     WESTERN_NUMERALS = '0123456789'
+    ARABIC_MONTHS = [
+        'يناير', 'فبراير', 'مارس', 'ابريل', 'مايو', 'يونيو',
+        'يوليو', 'اغسطس', 'سبتمبر', 'اكتوبر', 'نوفمبر', 'ديسمبر'
+    ]
     
     # Arabic translations (omitted for brevity)
     TRANSLATIONS = {
@@ -137,6 +141,25 @@ class ArabicTextHelper:
         except Exception as e:
             logger.warning(f"Error formatting date in Arabic: {e}")
             return dt.strftime('%Y-%m-%d %H:%M:%S')
+    
+    @classmethod
+    def format_date_arabic_dmy(cls, dt: Optional[datetime], include_time: bool = True) -> str:
+        """Format date as 'day month_name year' in Arabic, with Arabic numerals.
+        Example: '٢١ اكتوبر ٢٠٢٥' or with time '٢١ اكتوبر ٢٠٢٥ ١٤:٣٠'."""
+        if not dt:
+            return cls.translate("N/A")
+        try:
+            day = cls.to_arabic_numerals(dt.day)
+            month_name = cls.ARABIC_MONTHS[dt.month - 1]
+            year = cls.to_arabic_numerals(dt.year)
+            if include_time:
+                hour = cls.to_arabic_numerals(dt.hour)
+                minute = cls.to_arabic_numerals(dt.minute)
+                return f"{day} {month_name} {year} {hour}:{minute}"
+            return f"{day} {month_name} {year}"
+        except Exception as e:
+            logger.warning(f"Error formatting DMY Arabic date: {e}")
+            return dt.strftime('%d %B %Y')
     
     @classmethod
     def format_currency_arabic(cls, amount: float) -> str:
@@ -237,8 +260,8 @@ class ModernPDFHeaderFooter(PageTemplate):
         date_raw = datetime.now()
         
         if self.use_arabic:
-            # Format date in Arabic numerals and process with BiDi
-            date_text = ArabicTextHelper.format_date_arabic(date_raw)
+            # Format date in Arabic DMY numerals and process with BiDi
+            date_text = ArabicTextHelper.format_date_arabic_dmy(date_raw, include_time=True)
             date_text_proc = ArabicTextHelper.process_arabic_text(date_text)
             # Draw date on the left for Arabic layout
             canvas_obj.drawString(0.5 * inch, height - 0.35 * inch, date_text_proc)
@@ -533,7 +556,7 @@ class ModernReportsGenerator:
         elements.append(Spacer(1, 0.4 * inch))
         
         # Generation info
-        gen_date = ArabicTextHelper.format_date_arabic(datetime.now()) if self.use_arabic else datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        gen_date = ArabicTextHelper.format_date_arabic_dmy(datetime.now(), include_time=True) if self.use_arabic else datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         gen_text = self._bidi_process(f"{self._translate('Generated on')} {gen_date}")
         elements.append(Paragraph(
             f"<font color='#999999' size=8 fontName='{font_name}'>{gen_text}</font>",
@@ -548,18 +571,24 @@ class ModernReportsGenerator:
         font_name = self.arabic_font if self.use_arabic else 'Helvetica'
         font_name_bold = f"{font_name}-Bold" if self.use_arabic else 'Helvetica-Bold'
         styles = getSampleStyleSheet()
-        header_par_style = ParagraphStyle('TblHeader', parent=styles['Normal'], fontName=font_name_bold, fontSize=9, alignment=TA_RIGHT if self.use_arabic else TA_CENTER, wordWrap='CJK', leading=11)
-        body_par_style = ParagraphStyle('TblBody', parent=styles['Normal'], fontName=font_name, fontSize=8, alignment=TA_RIGHT if self.use_arabic else TA_LEFT, wordWrap='CJK', leading=10)
+        wrap_mode = 'RTL' if self.use_arabic else 'CJK'
+        header_par_style = ParagraphStyle('TblHeader', parent=styles['Normal'], fontName=font_name_bold, fontSize=9, alignment=TA_RIGHT if self.use_arabic else TA_CENTER, wordWrap=wrap_mode, leading=11)
+        body_par_style = ParagraphStyle('TblBody', parent=styles['Normal'], fontName=font_name, fontSize=8, alignment=TA_RIGHT if self.use_arabic else TA_LEFT, wordWrap=wrap_mode, leading=10)
         
         # Table data
+        ts_header_label = self._translate('Date') if self.use_arabic else self._translate('Timestamp')
+        balance_header_label = self._translate('Balance After (EGP)')
+        if self.use_arabic and not landscape_mode:
+            # Prevent splitting Arabic words in portrait daily report header
+            balance_header_label = balance_header_label.replace(' ', '\u00A0')
         header_row = [
             self._bidi_process(self._translate('ID')),
             self._bidi_process(self._translate('Card UID')),
             self._bidi_process(self._translate('Type')),
             self._bidi_process(self._translate('Amount (EGP)')),
-            self._bidi_process(self._translate('Balance After (EGP)')),
+            self._bidi_process(balance_header_label),
             self._bidi_process(self._translate('Employee')),
-            self._bidi_process(self._translate('Timestamp')),
+            self._bidi_process(ts_header_label),
         ]
         table_data_raw = [header_row]
         
@@ -575,7 +604,7 @@ class ModernReportsGenerator:
                 self._bidi_process(amount),
                 self._bidi_process(balance),
                 self._bidi_process(t.get('employee', 'N/A')),
-                self._bidi_process(ArabicTextHelper.format_date_arabic(t['timestamp']) if self.use_arabic else t['timestamp'].strftime('%Y-%m-%d %H:%M')),
+                self._bidi_process(ArabicTextHelper.format_date_arabic_dmy(t['timestamp'], include_time=False) if self.use_arabic else t['timestamp'].strftime('%Y-%m-%d %H:%M')),
             ]
             table_data_raw.append(row)
         
@@ -606,7 +635,11 @@ class ModernReportsGenerator:
 
         # Compute dynamic column widths based on page orientation and margins
         available_width = (A4[1] if landscape_mode else A4[0]) - 1.0 * inch  # match 0.5" margins on both sides
-        proportions = [0.06, 0.18, 0.08, 0.12, 0.12, 0.18, 0.26]  # 7 columns: ID, UID, Type, Amount, Balance, Employee, Timestamp
+        if landscape_mode:
+            proportions = [0.06, 0.18, 0.08, 0.12, 0.12, 0.18, 0.26]
+        else:
+            # Daily (portrait): give extra space to Balance After to avoid header wrapping in Arabic
+            proportions = [0.06, 0.16, 0.08, 0.12, 0.16, 0.16, 0.26]
         col_widths = [available_width * p for p in (proportions[::-1] if self.use_arabic else proportions)]
 
         table = Table(table_data, colWidths=col_widths, repeatRows=1, splitByRow=1)
@@ -680,7 +713,8 @@ class ModernReportsGenerator:
         styles = getSampleStyleSheet()
         tx_title_style = ParagraphStyle(
             'TxTitle', parent=styles['Heading2'], fontSize=16, textColor=self.PRIMARY_COLOR,
-            spaceAfter=12, fontName=f"{self.arabic_font}-Bold" if self.use_arabic else 'Helvetica-Bold'
+            spaceAfter=12, fontName=f"{self.arabic_font}-Bold" if self.use_arabic else 'Helvetica-Bold',
+            alignment=TA_RIGHT if self.use_arabic else TA_LEFT
         )
         elements.append(Paragraph(self._bidi_process(self._translate("Transactions")), tx_title_style))
         elements.append(Spacer(1, 0.15 * inch))
@@ -691,7 +725,8 @@ class ModernReportsGenerator:
             elements.append(PageBreak())
             analytics_style = ParagraphStyle(
                 'AnalyticsTitle', parent=styles['Heading2'], fontSize=16, textColor=self.PRIMARY_COLOR,
-                spaceAfter=12, fontName=f"{self.arabic_font}-Bold" if self.use_arabic else 'Helvetica-Bold'
+                spaceAfter=12, fontName=f"{self.arabic_font}-Bold" if self.use_arabic else 'Helvetica-Bold',
+                alignment=TA_RIGHT if self.use_arabic else TA_LEFT
             )
             elements.append(Paragraph(self._bidi_process(self._translate("Analytics")), analytics_style))
             elements.append(Spacer(1, 0.15 * inch))
@@ -721,7 +756,10 @@ class ModernReportsGenerator:
 
         transactions = (self.db_service.get_transactions(start_date=start_date, end_date=end_date)
                         if hasattr(self.db_service, 'get_transactions') else [])
-        period = date.strftime('%Y-%m-%d')
+        period = (
+            ArabicTextHelper.format_date_arabic_dmy(start_date, include_time=False)
+            if self.use_arabic else date.strftime('%Y-%m-%d')
+        )
         identifier = date.strftime('%Y%m%d')
         return self.generate_report('Daily Report', transactions, period, identifier, output_path=output_path)
 
@@ -739,7 +777,12 @@ class ModernReportsGenerator:
 
         transactions = (self.db_service.get_transactions(start_date=start_date, end_date=end_date)
                         if hasattr(self.db_service, 'get_transactions') else [])
-        period = f"{week_start.strftime('%Y-%m-%d')} to {week_end.strftime('%Y-%m-%d')}"
+        if self.use_arabic:
+            start_dmy = ArabicTextHelper.format_date_arabic_dmy(start_date, include_time=False)
+            end_dmy = ArabicTextHelper.format_date_arabic_dmy(end_date, include_time=False)
+            period = f"{start_dmy} إلى {end_dmy}"
+        else:
+            period = f"{week_start.strftime('%Y-%m-%d')} to {week_end.strftime('%Y-%m-%d')}"
         identifier = week_start.strftime('%Y%m%d')
         return self.generate_report('Weekly Report', transactions, period, identifier, landscape_mode=True, output_path=output_path)
 
@@ -755,7 +798,10 @@ class ModernReportsGenerator:
 
         transactions = (self.db_service.get_transactions(start_date=start_date, end_date=end_date)
                         if hasattr(self.db_service, 'get_transactions') else [])
-        period = start_date.strftime('%B %Y')
+        period = (
+            f"{ArabicTextHelper.ARABIC_MONTHS[month-1]} {ArabicTextHelper.to_arabic_numerals(year)}"
+            if self.use_arabic else start_date.strftime('%B %Y')
+        )
         identifier = f"{year}{month:02d}"
         return self.generate_report('Monthly Report', transactions, period, identifier, landscape_mode=True, output_path=output_path)
 
@@ -767,7 +813,7 @@ class ModernReportsGenerator:
         end_date = datetime(year + 1, 1, 1) - timedelta(seconds=1)
         transactions = (self.db_service.get_transactions(start_date=start_date, end_date=end_date)
                         if hasattr(self.db_service, 'get_transactions') else [])
-        period = f"{year}"
+        period = ArabicTextHelper.to_arabic_numerals(year) if self.use_arabic else f"{year}"
         identifier = f"{year}"
         return self.generate_report('Yearly Report', transactions, period, identifier, landscape_mode=True, output_path=output_path)
 
@@ -781,7 +827,12 @@ class ModernReportsGenerator:
         transactions = (self.db_service.get_transactions(start_date=start_date, end_date=end_date, card_uid=card_uid)
                         if hasattr(self.db_service, 'get_transactions') else [])
 
-        period_str = f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}"
+        if self.use_arabic:
+            start_dmy = ArabicTextHelper.format_date_arabic_dmy(start_date, include_time=False)
+            end_dmy = ArabicTextHelper.format_date_arabic_dmy(end_date, include_time=False)
+            period_str = f"{start_dmy} إلى {end_dmy}"
+        else:
+            period_str = f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}"
         if card_uid:
             period_str += f" ({self._translate('Card UID')}: {card_uid[:16]}...)"
 
