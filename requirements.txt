@@ -11,6 +11,10 @@ reportlab>=4.0.0
 matplotlib>=3.7.0
 python-bidi>=0.4.2
 arabic-reshaper>=3.0.0
+Pillow>=10.0.0
+
+# Receipt Printing (optional for direct printer support on Windows)
+# pywin32>=306  # Uncomment for direct printing to Windows printers
 
 # Packaging
 pyinstaller>=5.0.0
