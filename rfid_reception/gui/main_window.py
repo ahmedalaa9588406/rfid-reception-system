@@ -6,6 +6,7 @@ import logging
 import os
 from datetime import datetime, timedelta
 from rfid_reception.reports import ModernReportsGenerator
+from rfid_reception.services.receipt_printer import ReceiptPrinter
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,15 @@ class ModernMainWindow:
         self.reports_generator = reports_generator
         self.scheduler = scheduler
         self.config = config
+        
+        # Initialize receipt printer
+        company_name = config.get('company_name', 'RFID Reception System')
+        company_info = {
+            'address': config.get('company_address', ''),
+            'phone': config.get('company_phone', '')
+        }
+        self.receipt_printer = ReceiptPrinter(company_name, company_info)
+        self.auto_print_receipts = config.get('auto_print_receipts', True)
 
         self.root.title("RFID Reception System")
         self.root.geometry("1100x750")
@@ -227,18 +237,35 @@ class ModernMainWindow:
                            command=lambda a=amount: self.amount_var.set(str(a)))
             btn.pack(side='left', padx=3, fill='x', expand=True)
 
+        # Buttons frame
+        buttons_frame = tk.Frame(parent, bg=CARD_BG)
+        buttons_frame.pack(padx=15, pady=10, fill='x')
+        
         # Top-Up button
-        topup_btn = tk.Button(parent,
-                             text="✓ Confirm Top-Up",
-                             font=('Segoe UI', 12, 'bold'),
+        topup_btn = tk.Button(buttons_frame,
+                             text="✓ Add to Balance",
+                             font=('Segoe UI', 11, 'bold'),
                              bg=SUCCESS_COLOR,
                              fg='white',
                              relief='flat',
                              cursor='hand2',
-                             padx=20,
-                             pady=12,
+                             padx=15,
+                             pady=10,
                              command=self._top_up)
-        topup_btn.pack(padx=15, pady=15, fill='x')
+        topup_btn.pack(side='left', fill='x', expand=True, padx=(0, 5))
+        
+        # Write Balance button (sets exact amount)
+        write_btn = tk.Button(buttons_frame,
+                             text="✍ Set Balance",
+                             font=('Segoe UI', 11, 'bold'),
+                             bg=SECONDARY_COLOR,
+                             fg='white',
+                             relief='flat',
+                             cursor='hand2',
+                             padx=15,
+                             pady=10,
+                             command=self._write_balance)
+        write_btn.pack(side='right', fill='x', expand=True, padx=(5, 0))
 
         # Manual mode section
         sep3 = ttk.Separator(parent, orient='horizontal')
@@ -349,6 +376,8 @@ class ModernMainWindow:
         # Actions list
         actions = [
             ("🎫 View All Cards", self._show_all_cards, SUCCESS_COLOR),
+            ("🖨️ Print Last Receipt", self._print_last_receipt, WARNING_COLOR),
+            ("📄 Print Card Summary", self._print_card_summary, WARNING_COLOR),
             ("✏️ Insert Card Manual", self._show_manual_card_insert, WARNING_COLOR),
             ("📅 Daily Report", self._generate_daily_report_manual, PRIMARY_COLOR),
             ("🗓 Weekly Report", self._generate_weekly_report_manual, PRIMARY_COLOR),
@@ -394,33 +423,115 @@ class ModernMainWindow:
             self.status_var.set("Not connected to Arduino - Check settings")
 
     def _read_card(self):
-        """Read RFID card from Arduino."""
+        """Read RFID card from Arduino with automatic database save."""
+        # Immediate feedback - button clicked
+        self.status_var.set("⏳ Reading card... Please wait...")
+        self.root.update()
+        self.root.update_idletasks()
+        
+        # Check Arduino connection
         if not self.serial_service.is_connected:
-            messagebox.showerror("Connection Error", "Arduino not connected. Please check settings.")
+            self.status_var.set("⚠️ Arduino not connected! Please use Manual Mode to test.")
+            self.root.update_idletasks()
+            logger.warning("Read card attempted but Arduino not connected")
             return
 
-        self.status_var.set("Reading card...")
-        self.root.update_idletasks()
+        try:
+            # Show loading indicator
+            self.status_var.set("⏳ Loading card from Arduino... Please wait...")
+            self.root.update()
+            
+            # Read card from Arduino
+            success, result = self.serial_service.read_card()
 
-        success, result = self.serial_service.read_card()
-
-        if success:
-            self.current_card_uid = result
-            self.card_uid_var.set(result)
-            balance = self.db_service.get_card_balance(result)
-            self.current_balance = balance
-            self.balance_var.set(f"{balance:.2f} EGP")
-            self.status_var.set("Card read successfully")
-
-            try:
-                card = self.db_service.create_or_get_card(result)
-                messagebox.showinfo("Success", f"Card detected!\nUID: {result}\nBalance: {balance:.2f} EGP")
-            except Exception as e:
-                logger.error(f"DB save error: {e}")
-                messagebox.showwarning("Partial Success", f"Read OK, but DB error: {e}")
-        else:
-            self.status_var.set("Read failed")
-            messagebox.showerror("Read Error", str(result))
+            if success:
+                # Parse result - Arduino might send "UID:AMOUNT" format
+                raw_data = result.strip()
+                card_amount = None
+                
+                # Check if data contains amount (format: UID:AMOUNT)
+                if ':' in raw_data:
+                    parts = raw_data.split(':')
+                    raw_uid = parts[0]
+                    # Try to parse amount if present
+                    if len(parts) > 1 and parts[1]:
+                        try:
+                            card_amount = float(parts[1])
+                            logger.info(f"Card contains amount data: UID={raw_uid}, Amount={card_amount}")
+                        except ValueError:
+                            logger.warning(f"Could not parse amount from: {parts[1]}")
+                            card_amount = None
+                else:
+                    raw_uid = raw_data
+                
+                # Format card UID: remove all spaces and standardize format
+                card_uid = self._format_card_uid(raw_uid)
+                
+                # Update status
+                self.status_var.set(f"⏳ Saving card {card_uid} to database...")
+                self.root.update_idletasks()
+                
+                # Check if this is a new card
+                is_new_card = not self._card_exists_in_db(card_uid)
+                
+                try:
+                    # Automatically create or get card from database
+                    card = self.db_service.create_or_get_card(card_uid)
+                    
+                    # If card contains amount data, write it to the card balance
+                    if card_amount is not None and card_amount > 0:
+                        logger.info(f"Card has stored amount: {card_amount}, setting as balance")
+                        # Calculate difference and update
+                        current_balance = card['balance']
+                        if card_amount != current_balance:
+                            difference = card_amount - current_balance
+                            balance, tx_id = self.db_service.top_up(
+                                card_uid,
+                                difference,
+                                employee=self.config.get("employee_name", "Receptionist"),
+                                notes=f"Balance read from card: {card_amount}"
+                            )
+                            logger.info(f"Updated balance from card data: {current_balance} -> {balance}")
+                        else:
+                            balance = current_balance
+                    else:
+                        # Get the actual balance from database
+                        balance = card['balance']
+                    
+                    # Update UI with card information
+                    self.current_card_uid = card_uid
+                    self.card_uid_var.set(card_uid)
+                    self.current_balance = balance
+                    self.balance_var.set(f"{balance:.2f} EGP")
+                    
+                    # Force UI update
+                    self.root.update_idletasks()
+                    
+                    # Log the card read event (for audit)
+                    self._log_card_read(card_uid, is_new=is_new_card)
+                    
+                    # Update status bar with result (no popup)
+                    if is_new_card:
+                        self.status_var.set(f"✨ New card loaded: {card_uid} | Balance: {balance:.2f} EGP")
+                    else:
+                        self.status_var.set(f"✓ Card loaded: {card_uid} | Balance: {balance:.2f} EGP")
+                    
+                    logger.info(f"Card read and saved: {card_uid}, Balance: {balance:.2f} EGP, New: {is_new_card}")
+                    
+                except Exception as e:
+                    logger.error(f"Database error while saving card: {e}")
+                    self.status_var.set(f"❌ Database error: {str(e)}")
+                    self.root.update_idletasks()
+            else:
+                # Only show error in status bar, not popup
+                self.status_var.set(f"❌ Card read failed: {str(result)}")
+                self.root.update_idletasks()
+                logger.warning(f"Card read failed: {result}")
+                
+        except Exception as e:
+            logger.error(f"Error in read card function: {e}")
+            self.status_var.set(f"❌ Error: {str(e)}")
+            self.root.update_idletasks()
 
     def _toggle_manual_mode(self):
         """Toggle manual card entry mode."""
@@ -435,19 +546,47 @@ class ModernMainWindow:
             self._check_serial_connection()
 
     def _load_manual_card(self):
-        """Load card manually."""
-        uid = self.manual_uid_var.get().strip()
-        if not uid:
-            messagebox.showwarning("Input Required", "Enter a card UID.")
+        """Load card manually with automatic database save."""
+        raw_uid = self.manual_uid_var.get().strip()
+        if not raw_uid:
+            self.status_var.set("⚠️ Please enter a card UID")
             return
 
-        self.current_card_uid = uid
-        self.card_uid_var.set(uid)
-        balance = self.db_service.get_card_balance(uid)
-        self.current_balance = balance
-        self.balance_var.set(f"{balance:.2f} EGP")
-        self.status_var.set(f"Manual Card Loaded: {uid}")
-        messagebox.showinfo("Loaded", f"UID: {uid}\nBalance: {balance:.2f} EGP")
+        # Show loading
+        self.status_var.set("⏳ Loading card manually... Please wait...")
+        self.root.update_idletasks()
+
+        try:
+            # Format card UID to standard format (no spaces)
+            uid = self._format_card_uid(raw_uid)
+            
+            # Check if card exists
+            is_new_card = not self._card_exists_in_db(uid)
+            
+            # Automatically create or get card from database
+            card = self.db_service.create_or_get_card(uid)
+            
+            # Update UI
+            self.current_card_uid = uid
+            self.card_uid_var.set(uid)
+            balance = card['balance']
+            self.current_balance = balance
+            self.balance_var.set(f"{balance:.2f} EGP")
+            
+            # Log the event
+            self._log_card_read(uid, is_new=is_new_card)
+            
+            # Update status bar (no popup)
+            if is_new_card:
+                self.status_var.set(f"✨ New card created (Manual): {uid} | Balance: {balance:.2f} EGP")
+            else:
+                self.status_var.set(f"✓ Card loaded (Manual): {uid} | Balance: {balance:.2f} EGP")
+            
+            logger.info(f"Manual card loaded: {uid}, Balance: {balance:.2f} EGP, New: {is_new_card}")
+            
+        except Exception as e:
+            logger.error(f"Manual load error: {e}")
+            self.status_var.set(f"❌ Failed to load card: {str(e)}")
 
     def _top_up(self):
         """Perform top-up operation."""
@@ -483,6 +622,11 @@ class ModernMainWindow:
                 notes="Manual entry"
             )
             self._update_balance(new_bal)
+            
+            # Print receipt if enabled
+            if self.auto_print_receipts:
+                self._print_receipt(self.current_card_uid, amount, new_bal, tx_id)
+            
             messagebox.showinfo(
                 "Success (Manual)",
                 f"Added {amount:.2f} EGP\nNew Balance: {new_bal:.2f} EGP\n(Note: Card not written)"
@@ -502,6 +646,11 @@ class ModernMainWindow:
                     employee=self.config.get("employee_name", "Receptionist")
                 )
                 self._update_balance(new_bal)
+                
+                # Print receipt if enabled
+                if self.auto_print_receipts:
+                    self._print_receipt(self.current_card_uid, amount, new_bal, tx_id)
+                
                 messagebox.showinfo("Success", f"Added {amount:.2f} EGP\nNew Balance: {new_bal:.2f} EGP")
             except Exception as e:
                 logger.error(f"DB error after write: {e}")
@@ -515,6 +664,97 @@ class ModernMainWindow:
         self.balance_var.set(f"{new_balance:.2f} EGP")
         self.amount_var.set("")
         self.status_var.set("Top-up successful")
+    
+    def _print_receipt(self, card_uid, amount, balance_after, transaction_id):
+        """Print receipt for transaction."""
+        try:
+            employee = self.config.get("employee_name", "Receptionist")
+            success, result = self.receipt_printer.print_receipt(
+                card_uid=card_uid,
+                amount=amount,
+                balance_after=balance_after,
+                transaction_id=transaction_id,
+                employee=employee,
+                timestamp=datetime.now(),
+                auto_print=True
+            )
+            
+            if success:
+                if result.endswith('.pdf'):
+                    logger.info(f"Receipt saved to: {result}")
+                    self.status_var.set(f"Receipt saved: {os.path.basename(result)}")
+                else:
+                    logger.info(f"Receipt printed: {result}")
+                    self.status_var.set("Receipt printed successfully")
+            else:
+                logger.error(f"Receipt printing failed: {result}")
+                self.status_var.set("Receipt printing failed")
+        except Exception as e:
+            logger.error(f"Receipt printing error: {e}")
+            self.status_var.set(f"Receipt error: {str(e)}")
+    
+    def _print_last_receipt(self):
+        """Print receipt for last transaction."""
+        if not self.current_card_uid:
+            messagebox.showwarning("No Card", "No card loaded. Please read a card first.")
+            return
+        
+        try:
+            # Get last transaction for this card
+            transactions = self.db_service.get_transactions(card_uid=self.current_card_uid)
+            if not transactions:
+                messagebox.showinfo("No Transactions", "No transactions found for this card.")
+                return
+            
+            last_txn = transactions[0]  # Most recent
+            
+            employee = self.config.get("employee_name", "Receptionist")
+            success, result = self.receipt_printer.print_receipt(
+                card_uid=last_txn['card_uid'],
+                amount=last_txn['amount'],
+                balance_after=last_txn['balance_after'],
+                transaction_id=last_txn['id'],
+                employee=last_txn.get('employee', employee),
+                timestamp=last_txn['timestamp'],
+                auto_print=False  # Always save as PDF for reprints
+            )
+            
+            if success:
+                messagebox.showinfo("Receipt Saved", f"Receipt saved to:\n{result}")
+                # Optionally open the PDF
+                if messagebox.askyesno("Open Receipt", "Would you like to open the receipt?"):
+                    os.startfile(result)
+            else:
+                messagebox.showerror("Print Failed", result)
+        except Exception as e:
+            logger.error(f"Print last receipt error: {e}")
+            messagebox.showerror("Error", str(e))
+    
+    def _print_card_summary(self):
+        """Print complete card summary with transaction history."""
+        if not self.current_card_uid:
+            messagebox.showwarning("No Card", "No card loaded. Please read a card first.")
+            return
+        
+        try:
+            # Get card data
+            card = self.db_service.create_or_get_card(self.current_card_uid)
+            transactions = self.db_service.get_transactions(card_uid=self.current_card_uid)
+            
+            success, result = self.receipt_printer.print_card_summary(
+                card_data=card,
+                transactions=transactions
+            )
+            
+            if success:
+                messagebox.showinfo("Summary Saved", f"Card summary saved to:\n{result}")
+                if messagebox.askyesno("Open Summary", "Would you like to open the summary?"):
+                    os.startfile(result)
+            else:
+                messagebox.showerror("Print Failed", result)
+        except Exception as e:
+            logger.error(f"Print card summary error: {e}")
+            messagebox.showerror("Error", str(e))
 
     # ------------------------------------------------------------------ #
     # Dialog Openers
@@ -699,6 +939,143 @@ class ModernMainWindow:
         except Exception as e:
             logger.error(f"Export error: {e}")
             messagebox.showerror("Export Failed", str(e))
+    
+    def _format_card_uid(self, raw_uid):
+        """Format card UID to standard format without spaces."""
+        # First, check if UID contains amount data (format: UID:AMOUNT)
+        if ':' in raw_uid:
+            # Split and take only the UID part, ignore the amount
+            uid_part = raw_uid.split(':')[0]
+            logger.debug(f"Card UID contains amount data: '{raw_uid}' -> extracting UID: '{uid_part}'")
+            raw_uid = uid_part
+        
+        # Remove all spaces, tabs, and standardize to uppercase
+        formatted = raw_uid.replace(' ', '').replace('\t', '').strip().upper()
+        logger.debug(f"Card UID formatted: '{raw_uid}' -> '{formatted}'")
+        return formatted
+    
+    def _card_exists_in_db(self, card_uid):
+        """Check if a card exists in the database."""
+        try:
+            # Format card UID before checking
+            card_uid = self._format_card_uid(card_uid)
+            
+            # Check if card has any transactions (means it exists)
+            transactions = self.db_service.get_transactions(card_uid=card_uid)
+            if transactions:
+                return True
+            
+            # Check if card balance exists
+            balance = self.db_service.get_card_balance(card_uid)
+            return balance is not None
+        except Exception as e:
+            logger.debug(f"Card existence check failed: {e}")
+            return False
+    
+    def _log_card_read(self, card_uid, is_new=False):
+        """Log a card read event."""
+        try:
+            employee = self.config.get("employee_name", "Receptionist")
+            notes = "New card created" if is_new else "Card read from Arduino"
+            
+            if not is_new:
+                # Only log read events for existing cards
+                self.db_service.log_card_read(card_uid, employee=employee)
+                logger.info(f"Card read logged: {card_uid}")
+        except Exception as e:
+            logger.error(f"Failed to log card read: {e}")
+    
+    def _write_balance(self):
+        """Write a specific balance to the card (not add, but set)."""
+        if not self.current_card_uid:
+            messagebox.showwarning("No Card", "Read or load a card first.")
+            return
+
+        try:
+            amount = float(self.amount_var.get() or 0)
+            if amount < 0:
+                raise ValueError("Amount cannot be negative")
+        except ValueError:
+            messagebox.showerror("Invalid Amount", "Enter a valid number (0 or more).")
+            return
+
+        mode = "Manual" if self.manual_mode else "Arduino"
+        current_balance = self.current_balance
+        difference = amount - current_balance
+        
+        msg = f"Set balance to {amount:.2f} EGP?\n\n"
+        if difference > 0:
+            msg += f"This will ADD {difference:.2f} EGP to the card.\n"
+        elif difference < 0:
+            msg += f"This will DEDUCT {abs(difference):.2f} EGP from the card.\n"
+        else:
+            msg += f"Balance is already {amount:.2f} EGP (no change).\n"
+        msg += f"\nCard: {self.current_card_uid}\nMode: {mode}"
+        
+        if messagebox.askyesno("Confirm Balance Write", msg):
+            self.status_var.set("Writing balance...")
+            self.root.update_idletasks()
+
+            if self.manual_mode:
+                self._manual_write_balance(amount, difference)
+            else:
+                self._arduino_write_balance(amount, difference)
+    
+    def _manual_write_balance(self, new_balance, difference):
+        """Handle manual balance write."""
+        try:
+            # Use top_up with the difference (can be negative for deductions)
+            if difference != 0:
+                final_balance, tx_id = self.db_service.top_up(
+                    self.current_card_uid,
+                    difference,
+                    employee=self.config.get("employee_name", "Receptionist"),
+                    notes=f"Balance set to {new_balance:.2f} (Manual entry)"
+                )
+                self._update_balance(final_balance)
+                
+                # Print receipt if enabled
+                if self.auto_print_receipts:
+                    self._print_receipt(self.current_card_uid, difference, final_balance, tx_id)
+                
+                messagebox.showinfo(
+                    "Success (Manual)",
+                    f"Balance set to {new_balance:.2f} EGP\n(Note: Physical card not updated in manual mode)"
+                )
+            else:
+                messagebox.showinfo("No Change", "Balance is already at the specified amount.")
+        except Exception as e:
+            logger.error(f"Manual balance write error: {e}")
+            messagebox.showerror("DB Error", str(e))
+    
+    def _arduino_write_balance(self, new_balance, difference):
+        """Handle Arduino balance write."""
+        # For Arduino mode, we write the new balance to the card
+        success, uid, msg = self.serial_service.write_card(new_balance)
+        if success:
+            try:
+                # Update database with the difference
+                if difference != 0:
+                    final_balance, tx_id = self.db_service.top_up(
+                        self.current_card_uid,
+                        difference,
+                        employee=self.config.get("employee_name", "Receptionist"),
+                        notes=f"Balance set to {new_balance:.2f} (Arduino write)"
+                    )
+                    self._update_balance(final_balance)
+                    
+                    # Print receipt if enabled
+                    if self.auto_print_receipts:
+                        self._print_receipt(self.current_card_uid, difference, final_balance, tx_id)
+                    
+                    messagebox.showinfo("Success", f"Balance set to {new_balance:.2f} EGP\nPhysical card updated successfully.")
+                else:
+                    messagebox.showinfo("No Change", "Balance is already at the specified amount.")
+            except Exception as e:
+                logger.error(f"DB error after write: {e}")
+                messagebox.showerror("DB Error", str(e))
+        else:
+            messagebox.showerror("Write Failed", msg)
 
 
 # Backward compatibility alias
