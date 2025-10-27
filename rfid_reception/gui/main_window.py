@@ -722,11 +722,25 @@ class ModernMainWindow:
 
     def _arduino_top_up(self, amount, display_value):
         """Handle Arduino top-up with numeric value."""
+        # Calculate new balance BEFORE writing to card
+        new_balance_expected = self.current_balance + amount
+        
+        # Determine what to write to card (new total balance)
+        # For K-amounts, keep the K prefix; for numeric, write the new total
+        if display_value.startswith('K'):
+            # K-amount: write K + new total balance
+            card_write_value = f"K{new_balance_expected:.0f}"
+        else:
+            # Regular amount: write new total balance
+            card_write_value = str(new_balance_expected)
+        
         # Show clear instructions with messagebox warning
         result = messagebox.askokcancel(
             "Important - Keep Card on Reader",
             f"⚠️ PLEASE KEEP THE CARD ON THE READER!\n\n"
-            f"The system will now write '{display_value}' to the card.\n"
+            f"Adding {amount:.2f} EGP to card.\n"
+            f"New balance will be: {new_balance_expected:.2f} EGP\n"
+            f"Card will store: '{card_write_value}'\n\n"
             f"Do NOT remove the card until you see a success message.\n\n"
             f"Click OK when the card is on the reader and you're ready.",
             icon='warning'
@@ -737,18 +751,18 @@ class ModernMainWindow:
             return
         
         # Show clear instructions to user
-        self.status_var.set("⏳ Writing to card... KEEP CARD ON READER!")
+        self.status_var.set(f"⏳ Writing '{card_write_value}' to card... KEEP CARD ON READER!")
         self.root.update()
         self.root.update_idletasks()
         
-        success, uid, msg = self.serial_service.write_card(display_value)
+        success, uid, msg = self.serial_service.write_card(card_write_value)
         if success:
             try:
                 new_bal, tx_id = self.db_service.top_up(
                     self.current_card_uid,
                     amount,
                     employee=self.config.get("employee_name", "Receptionist"),
-                    notes=f"Arduino write: {display_value}"
+                    notes=f"Arduino write: {card_write_value} (added {amount:.2f})"
                 )
                 self._update_balance(new_bal)
                 
@@ -756,8 +770,8 @@ class ModernMainWindow:
                 if self.auto_print_receipts:
                     self._print_receipt(self.current_card_uid, amount, new_bal, tx_id)
                 
-                self.status_var.set(f"✓ Successfully wrote {display_value} to card!")
-                messagebox.showinfo("Success", f"Added {amount:.2f} EGP\nNew Balance: {new_bal:.2f} EGP\nCard data: '{msg.split(':')[-1]}'")
+                self.status_var.set(f"✓ Successfully wrote {card_write_value} to card!")
+                messagebox.showinfo("Success", f"Added {amount:.2f} EGP\nNew Balance: {new_bal:.2f} EGP\nCard now stores: '{card_write_value}'")
             except Exception as e:
                 logger.error(f"DB error after write: {e}")
                 self.status_var.set(f"❌ Database error: {str(e)}")
