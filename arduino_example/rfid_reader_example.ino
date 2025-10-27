@@ -6,6 +6,7 @@
  * Hardware Required:
  * - Arduino Uno/Nano/Mega
  * - MFRC522 RFID Reader Module
+ * - ST7735 TFT Display (optional, for visual feedback)
  * - LED (optional, for status indication)
  * - 220Ω Resistor (for LED)
  * 
@@ -22,28 +23,51 @@
  * LED Connection (optional):
  * - LED Anode (+) -> Pin 8 -> 220Ω Resistor -> LED Cathode (-) -> GND
  * 
+ * TFT Display Connection (optional):
+ * - TFT_CS  -> Pin 5
+ * - TFT_DC  -> Pin 6
+ * - TFT_RST -> Pin 7
+ * - VCC -> 5V
+ * - GND -> GND
+ * 
  * Protocol:
- * - READ\n -> Returns UID:<card_uid>\n or ERROR:<message>\n
+ * - READ\n -> Returns UID:<card_uid>\n or ERROR:<message>\n (card is halted after read)
+ * - READ_KEEP\n -> Returns UID:<card_uid>\n or ERROR:<message>\n (card stays active for immediate write)
  * - WRITE:<amount>\n -> Returns OK:WROTE:<uid>:<amount>\n or ERROR:<message>\n
  * - PING\n -> Returns PONG\n
  * 
  * Installation:
  * 1. Install MFRC522 library: Tools -> Manage Libraries -> Search "MFRC522" -> Install
- * 2. Upload this sketch to your Arduino
- * 3. Note the COM port in Tools -> Port
- * 4. Configure this port in your Python application
+ * 2. Install Adafruit GFX library: Search "Adafruit GFX" -> Install
+ * 3. Install Adafruit ST7735 library: Search "Adafruit ST7735" -> Install
+ * 4. Upload this sketch to your Arduino
+ * 5. Note the COM port in Tools -> Port
+ * 6. Configure this port in your Python application
  */
 
 #include <SPI.h>
 #include <MFRC522.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_ST7735.h>
 
 // Pin definitions
 #define RST_PIN         9    // Reset pin for MFRC522
 #define SS_PIN          10   // Slave Select pin for MFRC522
 #define LED_PIN         8    // Status LED (optional)
 
+// TFT Display pins (optional - comment out if not using)
+#define TFT_CS          5    // TFT Chip Select
+#define TFT_DC          6    // TFT Data/Command
+#define TFT_RST         7    // TFT Reset
+#define USE_TFT         true // Set to false to disable TFT display
+
 // Create MFRC522 instance
 MFRC522 mfrc522(SS_PIN, RST_PIN);
+
+// Create TFT instance (optional)
+#if USE_TFT
+Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);
+#endif
 
 // Communication variables
 String inputString = "";
@@ -51,20 +75,23 @@ boolean stringComplete = false;
 
 // Card data structure for writing
 struct CardData {
-  float amount;
-  uint32_t checksum;
+  char text[12];        // Text data (up to 11 chars + null terminator)
+  uint32_t checksum;    // Checksum for validation
 };
 
 // Function prototypes
 void processCommand(String command);
 void handleRead();
-void handleWrite(float amount);
+void handleReadKeep();
+void handleWrite(String data);
 String getCardUID();
-bool writeCardData(float amount);
-float readCardData();
-uint32_t calculateChecksum(float amount);
+bool writeCardData(String data);
+String readCardData();
+uint32_t calculateChecksum(const char* text);
 void blinkLED(int times, int delayMs);
 void setLED(bool state);
+void displayWrittenData(String value);
+void initTFT();
 
 void setup() {
   // Initialize serial communication
@@ -94,6 +121,9 @@ void setup() {
       delay(1000);
     }
   }
+  
+  // Initialize TFT Display (optional)
+  initTFT();
   
   // Reserve memory for input string
   inputString.reserve(200);
@@ -129,61 +159,95 @@ void loop() {
 void processCommand(String command) {
   command.trim();
   
-  if (command.equals("READ")) {
+  // Ignore empty commands
+  if (command.length() == 0) {
+    return;
+  }
+  
+  // Convert to uppercase for case-insensitive matching
+  String cmdUpper = command;
+  cmdUpper.toUpperCase();
+  
+  if (cmdUpper.equals("READ")) {
     handleRead();
   }
-  else if (command.startsWith("WRITE:")) {
-    String amountStr = command.substring(6);
-    float amount = amountStr.toFloat();
-    if (amount <= 0) {
-      Serial.println("ERROR:Invalid amount");
+  else if (cmdUpper.equals("READ_KEEP")) {
+    handleReadKeep();
+  }
+  else if (cmdUpper.startsWith("WRITE:")) {
+    // Extract data after "WRITE:"
+    String data = command.substring(6);
+    data.trim();
+    
+    if (data.length() == 0) {
+      Serial.println("ERROR:Empty data");
+    } else if (data.length() > 11) {
+      Serial.println("ERROR:Data too long (max 11 chars)");
     } else {
-      handleWrite(amount);
+      handleWrite(data);
     }
   }
-  else if (command.equals("PING")) {
+  else if (cmdUpper.equals("PING")) {
     Serial.println("PONG");
   }
-  else if (command.equals("RESET")) {
+  else if (cmdUpper.equals("RESET")) {
     mfrc522.PCD_Init();
     Serial.println("OK:RESET");
   }
   else {
-    Serial.println("ERROR:Unknown command");
+    // Log unknown command for debugging
+    Serial.print("ERROR:Unknown command: ");
+    Serial.println(command);
   }
 }
 
 void handleRead() {
-  setLED(true); // Turn on LED
+  setLED(true);
   
-  // Wait for card (with timeout)
+  // Soft reset to ensure clean state
+  mfrc522.PCD_Init();
+  delay(100);
+  
+  // Wait for card with multiple attempts
   unsigned long startTime = millis();
-  const unsigned long timeout = 3000; // 3 second timeout
+  const unsigned long timeout = 5000; // 5 second timeout
+  int attempts = 0;
   
   while (millis() - startTime < timeout) {
-    // Look for new cards
-    if (!mfrc522.PICC_IsNewCardPresent()) {
-      delay(50);
-      continue;
+    attempts++;
+    
+    // Multiple quick checks
+    for (int i = 0; i < 3; i++) {
+      // Look for new cards
+      if (mfrc522.PICC_IsNewCardPresent()) {
+        delay(10);
+        // Select one of the cards
+        if (mfrc522.PICC_ReadCardSerial()) {
+          // Card detected successfully
+          String uid = getCardUID();
+          
+          // Try to read card data
+          String cardData = readCardData();
+          if (cardData != "" && cardData != "ERROR" && cardData != "INVALID") {
+            // Display on TFT if available
+            displayWrittenData(cardData);
+            Serial.println("UID:" + uid + ":" + cardData);
+          } else {
+            Serial.println("UID:" + uid);
+          }
+          
+          // Halt PICC
+          mfrc522.PICC_HaltA();
+          mfrc522.PCD_StopCrypto1();
+          
+          setLED(false);
+          blinkLED(2, 100);
+          return;
+        }
+      }
+      delay(20);
     }
-    
-    // Select one of the cards
-    if (!mfrc522.PICC_ReadCardSerial()) {
-      delay(50);
-      continue;
-    }
-    
-    // Card detected successfully
-    String uid = getCardUID();
-    Serial.println("UID:" + uid);
-    
-    // Halt PICC
-    mfrc522.PICC_HaltA();
-    mfrc522.PCD_StopCrypto1();
-    
-    setLED(false);
-    blinkLED(2, 100); // Success indication
-    return;
+    delay(50);
   }
   
   // Timeout reached
@@ -191,49 +255,118 @@ void handleRead() {
   Serial.println("ERROR:No card detected (timeout)");
 }
 
-void handleWrite(float amount) {
+void handleReadKeep() {
+  // Read card but keep it active for subsequent operations (e.g., immediate write)
   setLED(true);
   
-  // Wait for card (with timeout)
+  // Soft reset to ensure clean state
+  mfrc522.PCD_Init();
+  delay(100);
+  
+  // Wait for card with multiple attempts
   unsigned long startTime = millis();
-  const unsigned long timeout = 3000;
+  const unsigned long timeout = 5000; // 5 second timeout
+  int attempts = 0;
   
   while (millis() - startTime < timeout) {
-    // Look for new cards
-    if (!mfrc522.PICC_IsNewCardPresent()) {
-      delay(50);
-      continue;
+    attempts++;
+    
+    // Multiple quick checks
+    for (int i = 0; i < 3; i++) {
+      // Look for new cards
+      if (mfrc522.PICC_IsNewCardPresent()) {
+        delay(10);
+        // Select one of the cards
+        if (mfrc522.PICC_ReadCardSerial()) {
+          // Card detected successfully
+          String uid = getCardUID();
+          Serial.println("UID:" + uid);
+          
+          // DO NOT halt PICC - keep it active for immediate write
+          // mfrc522.PICC_HaltA();  // Commented out
+          // mfrc522.PCD_StopCrypto1();  // Commented out
+          
+          setLED(false);
+          blinkLED(2, 100);
+          return;
+        }
+      }
+      delay(20);
     }
-    
-    // Select one of the cards
-    if (!mfrc522.PICC_ReadCardSerial()) {
-      delay(50);
-      continue;
-    }
-    
-    // Card detected, get UID
-    String uid = getCardUID();
-    
-    // Attempt to write data
-    if (writeCardData(amount)) {
-      Serial.println("OK:WROTE:" + uid + ":" + String(amount, 2));
-      blinkLED(3, 150); // Success indication
-    } else {
-      Serial.println("ERROR:Failed to write to card");
-      blinkLED(5, 100); // Error indication
-    }
-    
-    // Halt PICC
-    mfrc522.PICC_HaltA();
-    mfrc522.PCD_StopCrypto1();
-    
-    setLED(false);
-    return;
+    delay(50);
   }
   
   // Timeout reached
   setLED(false);
-  Serial.println("ERROR:No card detected for writing (timeout)");
+  Serial.println("ERROR:No card detected (timeout)");
+}
+
+void handleWrite(String data) {
+  setLED(true);
+  Serial.println("STATUS:Ready to write - place card now...");
+  
+  // HARD reset to ensure card detection works even after previous halt
+  // This is critical when card was previously read and halted
+  mfrc522.PCD_Reset();      // Hardware reset
+  delay(50);
+  mfrc522.PCD_Init();       // Re-initialize
+  delay(150);               // Longer delay for full initialization
+  mfrc522.PCD_AntennaOn();  // Ensure antenna is on
+  delay(50);
+  
+  // Wait for card with multiple attempts
+  unsigned long startTime = millis();
+  const unsigned long timeout = 10000; // 10 seconds for writing
+  unsigned long lastStatusTime = millis();
+  int attempts = 0;
+  
+  while (millis() - startTime < timeout) {
+    attempts++;
+    
+    // Send status update every 2 seconds
+    if (millis() - lastStatusTime > 2000) {
+      Serial.println("STATUS:Still waiting for card...");
+      lastStatusTime = millis();
+      blinkLED(1, 50);
+    }
+    
+    // More aggressive card detection - try multiple times per loop
+    for (int i = 0; i < 5; i++) {  // Increased from 3 to 5 attempts
+      // Look for new cards (PICC_IsNewCardPresent will wake up halted cards)
+      if (mfrc522.PICC_IsNewCardPresent()) {
+        delay(10);
+        // Select one of the cards
+        if (mfrc522.PICC_ReadCardSerial()) {
+          // Card detected
+          Serial.println("STATUS:Card detected, writing...");
+          String uid = getCardUID();
+          
+          // Attempt to write data
+          if (writeCardData(data)) {
+            Serial.println("OK:WROTE:" + uid + ":" + data);
+            displayWrittenData(data);  // Display on TFT
+            blinkLED(3, 150);
+          } else {
+            Serial.println("ERROR:Write failed - authentication issue");
+            blinkLED(5, 100);
+          }
+          
+          // Halt PICC
+          mfrc522.PICC_HaltA();
+          mfrc522.PCD_StopCrypto1();
+          
+          setLED(false);
+          return;
+        }
+      }
+      delay(15);  // Slightly longer delay between attempts
+    }
+    delay(30);  // Shorter delay between loop cycles
+  }
+  
+  // Timeout reached
+  setLED(false);
+  Serial.println("ERROR:No card detected after " + String(attempts) + " attempts");
 }
 
 String getCardUID() {
@@ -248,7 +381,7 @@ String getCardUID() {
   return uid;
 }
 
-bool writeCardData(float amount) {
+bool writeCardData(String data) {
   // We'll write to block 4 (sector 1, block 0)
   // Note: Blocks 0-3 are in sector 0, blocks 4-7 in sector 1, etc.
   // Block 0 contains manufacturer data and should not be written
@@ -277,8 +410,9 @@ bool writeCardData(float amount) {
   
   // Create card data structure
   CardData cardData;
-  cardData.amount = amount;
-  cardData.checksum = calculateChecksum(amount);
+  memset(cardData.text, 0, sizeof(cardData.text));
+  strncpy(cardData.text, data.c_str(), sizeof(cardData.text) - 1);
+  cardData.checksum = calculateChecksum(cardData.text);
   
   // Copy data to block
   memcpy(dataBlock, &cardData, sizeof(CardData));
@@ -292,7 +426,7 @@ bool writeCardData(float amount) {
   return true;
 }
 
-float readCardData() {
+String readCardData() {
   byte sector = 1;
   byte blockAddr = 4;
   byte trailerBlock = 7;
@@ -306,7 +440,7 @@ float readCardData() {
   MFRC522::StatusCode status;
   status = mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, trailerBlock, &key, &(mfrc522.uid));
   if (status != MFRC522::STATUS_OK) {
-    return -1.0;
+    return "ERROR";
   }
   
   // Read data from block
@@ -314,7 +448,7 @@ float readCardData() {
   byte size = sizeof(buffer);
   status = mfrc522.MIFARE_Read(blockAddr, buffer, &size);
   if (status != MFRC522::STATUS_OK) {
-    return -1.0;
+    return "ERROR";
   }
   
   // Extract card data
@@ -322,17 +456,22 @@ float readCardData() {
   memcpy(&cardData, buffer, sizeof(CardData));
   
   // Verify checksum
-  if (cardData.checksum != calculateChecksum(cardData.amount)) {
-    return -1.0; // Invalid data
+  if (cardData.checksum != calculateChecksum(cardData.text)) {
+    return "INVALID"; // Invalid data
   }
   
-  return cardData.amount;
+  // Ensure null termination
+  cardData.text[sizeof(cardData.text) - 1] = '\0';
+  return String(cardData.text);
 }
 
-uint32_t calculateChecksum(float amount) {
-  // Simple checksum: multiply by 1000 and XOR with magic number
-  uint32_t temp = (uint32_t)(amount * 1000);
-  return temp ^ 0xDEADBEEF;
+uint32_t calculateChecksum(const char* text) {
+  // Simple checksum: sum of all characters XOR with magic number
+  uint32_t sum = 0;
+  for (int i = 0; text[i] != '\0' && i < 12; i++) {
+    sum += (uint32_t)text[i] * (i + 1);
+  }
+  return sum ^ 0xDEADBEEF;
 }
 
 void blinkLED(int times, int delayMs) {
@@ -346,4 +485,52 @@ void blinkLED(int times, int delayMs) {
 
 void setLED(bool state) {
   digitalWrite(LED_PIN, state ? HIGH : LOW);
+}
+
+void initTFT() {
+  #if USE_TFT
+  // Initialize TFT display
+  tft.initR(INITR_BLACKTAB);
+  tft.setRotation(1);  // Landscape mode
+  tft.fillScreen(ST77XX_BLACK);
+  
+  // Display header
+  tft.setTextColor(ST77XX_CYAN);
+  tft.setTextSize(3);
+  tft.setCursor(15, 20);
+  tft.print("Balance");
+  
+  // Display initial message
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(2);
+  tft.setCursor(10, 70);
+  tft.print("Scan Card");
+  
+  Serial.println("TFT Display initialized");
+  #else
+  Serial.println("TFT Display disabled");
+  #endif
+}
+
+void displayWrittenData(String value) {
+  #if USE_TFT
+  // Clear the data area (keep header)
+  tft.fillRect(0, 70, tft.width(), 60, ST77XX_BLACK);
+  
+  // Display the value in large yellow text
+  tft.setTextColor(ST77XX_YELLOW);
+  tft.setTextSize(4);
+  
+  // Calculate center position for text
+  int16_t x1, y1;
+  uint16_t w, h;
+  tft.getTextBounds(value, 0, 0, &x1, &y1, &w, &h);
+  int xPos = (tft.width() - w) / 2;
+  if (xPos < 0) xPos = 5;  // Ensure text is visible
+  
+  tft.setCursor(xPos, 90);
+  tft.print(value);
+  
+  Serial.println("TFT Display updated: " + value);
+  #endif
 }

@@ -63,27 +63,43 @@ class SerialCommunicationService:
         
         for attempt in range(retries):
             try:
+                # Clear input buffer before sending command
+                if hasattr(self.connection, "reset_input_buffer"):
+                    self.connection.reset_input_buffer()
+                
                 # Send read command
                 self.connection.write(b"READ\n")
-                time.sleep(0.5)
+                self.connection.flush()  # Ensure command is sent
                 
-                # Read response
-                if self.connection.in_waiting > 0:
-                    response = self.connection.readline().decode('utf-8').strip()
-                    
-                    if response.startswith("UID:"):
-                        uid = response.split(":", 1)[1]
-                        logger.info(f"Card read successfully: {uid}")
-                        return True, uid
-                    elif response.startswith("ERROR:"):
-                        error_msg = response.split(":", 1)[1]
-                        logger.warning(f"Error reading card: {error_msg}")
-                        return False, error_msg
-                    else:
-                        logger.warning(f"Unexpected response: {response}")
+                # Wait for response with timeout
+                end_time = time.time() + 6.0  # 6 second timeout
+                while time.time() < end_time:
+                    if self.connection.in_waiting > 0:
+                        response = self.connection.readline().decode('utf-8', errors='ignore').strip()
+                        if not response:
+                            continue
+                        
+                        if response.startswith("UID:"):
+                            uid = response.split(":", 1)[1]
+                            logger.info(f"Card read successfully: {uid}")
+                            return True, uid
+                        elif response.startswith("ERROR:"):
+                            error_msg = response.split(":", 1)[1]
+                            logger.warning(f"Error reading card: {error_msg}")
+                            return False, error_msg
+                        elif response.startswith("STATUS:"):
+                            # Informational message, log and keep waiting
+                            logger.debug(f"Arduino status: {response}")
+                            continue
+                        else:
+                            # Ignore other messages during read
+                            logger.debug(f"Ignoring message during read: {response}")
+                            continue
+                    time.sleep(0.05)  # Short sleep to prevent busy waiting
                 
                 if attempt < retries - 1:
-                    time.sleep(0.5)
+                    logger.debug(f"Read attempt {attempt + 1} timed out, retrying...")
+                    time.sleep(0.3)
                     
             except serial.SerialException as e:
                 logger.error(f"Serial error during card read (attempt {attempt + 1}): {e}")
@@ -92,12 +108,12 @@ class SerialCommunicationService:
         
         return False, "Failed to read card after retries"
     
-    def write_card(self, amount, retries=3) -> Tuple[bool, str, str]:
+    def write_card(self, data, retries=3) -> Tuple[bool, str, str]:
         """
-        Send top-up command to Arduino to write amount to RFID card.
+        Send write command to Arduino to write data to RFID card.
         
         Args:
-            amount: Amount to write to card
+            data: Data to write to card (numeric or string)
             retries: Number of retry attempts
         
         Returns:
@@ -106,34 +122,68 @@ class SerialCommunicationService:
         if not self.is_connected or not self.connection:
             return False, "", "Not connected to Arduino"
         
+        # Send RESET command before first write attempt to ensure clean state
+        try:
+            if hasattr(self.connection, "reset_input_buffer"):
+                self.connection.reset_input_buffer()
+            self.connection.write(b"RESET\n")
+            self.connection.flush()
+            time.sleep(0.3)  # Wait for reset to complete
+            # Clear any response
+            while self.connection.in_waiting > 0:
+                self.connection.readline()
+            logger.debug("Sent RESET command before write")
+        except Exception as e:
+            logger.warning(f"Could not send RESET command: {e}")
+        
         for attempt in range(retries):
             try:
-                # Send write command
-                command = f"WRITE:{amount}\n"
-                self.connection.write(command.encode('utf-8'))
-                time.sleep(1)  # Wait for write operation
+                # Clear input buffer before sending command
+                if hasattr(self.connection, "reset_input_buffer"):
+                    self.connection.reset_input_buffer()
                 
-                # Read response
-                if self.connection.in_waiting > 0:
-                    response = self.connection.readline().decode('utf-8').strip()
-                    
-                    if response.startswith("OK:WROTE:"):
-                        # Format: OK:WROTE:<uid>:<amount>
-                        parts = response.split(":")
-                        if len(parts) >= 4:
-                            uid = parts[2]
-                            written_amount = parts[3]
-                            logger.info(f"Card written successfully: {uid} with {written_amount}")
-                            return True, uid, f"Successfully wrote {written_amount} to card"
-                    elif response.startswith("ERROR:"):
-                        error_msg = response.split(":", 1)[1]
-                        logger.warning(f"Error writing card: {error_msg}")
-                        return False, "", error_msg
-                    else:
-                        logger.warning(f"Unexpected response: {response}")
+                # Send write command (data can be numeric or string)
+                command = f"WRITE:{data}\n"
+                self.connection.write(command.encode('utf-8'))
+                self.connection.flush()  # Ensure command is sent
+                logger.debug(f"Sent write command: {command.strip()}")
+                
+                # Wait and read multiple responses (Arduino may send STATUS messages)
+                # Increased timeout to 15 seconds to give more time for card detection
+                end_time = time.time() + 15.0
+                while time.time() < end_time:
+                    if self.connection.in_waiting > 0:
+                        response = self.connection.readline().decode('utf-8', errors='ignore').strip()
+                        if not response:
+                            continue
+                        
+                        logger.debug(f"Received: {response}")
+                            
+                        if response.startswith("OK:WROTE:"):
+                            # Format: OK:WROTE:<uid>:<data>
+                            parts = response.split(":")
+                            if len(parts) >= 4:
+                                uid = parts[2]
+                                written_data = ":".join(parts[3:])  # Rejoin in case data contains colon
+                                logger.info(f"Card written successfully: {uid} with {written_data}")
+                                return True, uid, f"Successfully wrote {written_data} to card"
+                        elif response.startswith("ERROR:"):
+                            error_msg = response.split(":", 1)[1]
+                            logger.warning(f"Error writing card: {error_msg}")
+                            return False, "", error_msg
+                        elif response.startswith("STATUS:"):
+                            # Status message from Arduino, log and continue
+                            status_msg = response.split(":", 1)[1]
+                            logger.info(f"Arduino status: {status_msg}")
+                            continue
+                        else:
+                            # Ignore other messages
+                            logger.debug(f"Ignoring non-protocol message: {response}")
+                    time.sleep(0.05)  # Short sleep to prevent busy waiting
                 
                 if attempt < retries - 1:
-                    time.sleep(0.5)
+                    logger.debug(f"Write attempt {attempt + 1} timed out, retrying...")
+                    time.sleep(0.3)
                     
             except serial.SerialException as e:
                 logger.error(f"Serial error during card write (attempt {attempt + 1}): {e}")
@@ -149,11 +199,19 @@ class SerialCommunicationService:
             return False
         
         try:
+            # Clear any pending data first
+            if hasattr(self.connection, "reset_input_buffer"):
+                self.connection.reset_input_buffer()
+            
             # Try to write a simple ping command
             self.connection.write(b"PING\n")
+            self.connection.flush()
             time.sleep(0.3)
-            if self.connection.in_waiting > 0:
-                self.connection.readline()  # Clear buffer
+            
+            # Clear response buffer
+            while self.connection.in_waiting > 0:
+                self.connection.readline()
+            
             return True
         except serial.SerialException:
             self.is_connected = False
