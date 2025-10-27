@@ -61,6 +61,9 @@ class ModernMainWindow:
         self.current_card_uid = None
         self.current_balance = 0.0
         self.manual_mode = False
+        self.auto_scan_enabled = False
+        self.auto_scan_job = None
+        self.last_scanned_uid = None
 
         self._setup_styles()
         self._create_widgets()
@@ -159,8 +162,12 @@ class ModernMainWindow:
         # Balance section
         self._create_balance_section(parent)
 
+        # Button frame for Read Card and Auto-Scan toggle
+        btn_frame = tk.Frame(parent, bg=CARD_BG)
+        btn_frame.pack(padx=15, pady=15, fill='x')
+        
         # Read Card button
-        read_btn = tk.Button(parent,
+        read_btn = tk.Button(btn_frame,
                             text="🔍 Read Card",
                             font=('Segoe UI', 12, 'bold'),
                             bg=PRIMARY_COLOR,
@@ -170,7 +177,20 @@ class ModernMainWindow:
                             padx=20,
                             pady=12,
                             command=self._read_card)
-        read_btn.pack(padx=15, pady=15, fill='x')
+        read_btn.pack(side='left', fill='x', expand=True, padx=(0, 5))
+        
+        # Auto-Scan Toggle button
+        self.auto_scan_btn = tk.Button(btn_frame,
+                                      text="⚡ Enable Auto-Scan",
+                                      font=('Segoe UI', 10, 'bold'),
+                                      bg=SUCCESS_COLOR,
+                                      fg='white',
+                                      relief='flat',
+                                      cursor='hand2',
+                                      padx=15,
+                                      pady=12,
+                                      command=self._toggle_auto_scan)
+        self.auto_scan_btn.pack(side='left', fill='x', expand=True, padx=(5, 0))
 
         # Spacer
         spacer = ttk.Frame(parent, height=20)
@@ -182,11 +202,19 @@ class ModernMainWindow:
 
         # Top-Up amount section
         topup_label = tk.Label(parent,
-                              text="💰 Top-Up Amount",
+                              text="💰 Top-Up Amount / Write Data",
                               font=('Segoe UI', 12, 'bold'),
                               fg=PRIMARY_COLOR,
                               bg=CARD_BG)
         topup_label.pack(padx=15, pady=(10, 5), anchor='w')
+        
+        # Instruction label
+        instruction_label = tk.Label(parent,
+                                    text="Enter: 50 (number) | K50 (K-amount) | Ahmed (text) - Max 11 chars",
+                                    font=('Segoe UI', 8),
+                                    fg=TEXT_SECONDARY,
+                                    bg=CARD_BG)
+        instruction_label.pack(padx=15, pady=(0, 5), anchor='w')
 
         # Amount input with EGP label
         amount_frame = tk.Frame(parent, bg=CARD_BG)
@@ -588,38 +616,95 @@ class ModernMainWindow:
             logger.error(f"Manual load error: {e}")
             self.status_var.set(f"❌ Failed to load card: {str(e)}")
 
+    def _parse_input(self, input_value):
+        """Parse input to detect type: numeric, K-prefixed, or string.
+        
+        Returns:
+            tuple: (input_type, amount, display_value)
+            - input_type: 'numeric', 'k_amount', or 'string'
+            - amount: float value (0.0 for non-numeric)
+            - display_value: string to write to card
+        """
+        input_value = input_value.strip().upper()
+        
+        # Check for K-prefix (e.g., K50)
+        if input_value.startswith('K'):
+            try:
+                amount = float(input_value[1:])
+                if amount > 0:
+                    return 'k_amount', amount, input_value
+            except ValueError:
+                pass
+        
+        # Try to parse as regular numeric
+        try:
+            amount = float(input_value)
+            if amount > 0:
+                return 'numeric', amount, str(amount)
+        except ValueError:
+            pass
+        
+        # It's a string
+        return 'string', 0.0, input_value
+    
     def _top_up(self):
-        """Perform top-up operation."""
+        """Perform top-up operation or write string data."""
         if not self.current_card_uid:
             messagebox.showwarning("No Card", "Read or load a card first.")
             return
 
-        try:
-            amount = float(self.amount_var.get() or 0)
-            if amount <= 0:
-                raise ValueError
-        except ValueError:
-            messagebox.showerror("Invalid Amount", "Enter a positive number.")
+        input_value = self.amount_var.get().strip()
+        if not input_value:
+            messagebox.showerror("Empty Input", "Please enter a value.")
+            return
+        
+        # Check if input is too long for card storage
+        if len(input_value) > 11:
+            messagebox.showerror("Input Too Long", "Maximum 11 characters allowed for card storage.")
             return
 
+        # Parse input
+        input_type, amount, display_value = self._parse_input(input_value)
         mode = "Manual" if self.manual_mode else "Arduino"
-        if messagebox.askyesno("Confirm", f"Add {amount:.2f} EGP to {self.current_card_uid}?\nMode: {mode}"):
-            self.status_var.set("Processing top-up...")
-            self.root.update_idletasks()
+        
+        if input_type == 'numeric':
+            # Regular numeric input
+            if messagebox.askyesno("Confirm", f"Add {amount:.2f} EGP to {self.current_card_uid}?\nMode: {mode}"):
+                self.status_var.set("Processing top-up...")
+                self.root.update_idletasks()
+                if self.manual_mode:
+                    self._manual_top_up(amount, display_value)
+                else:
+                    self._arduino_top_up(amount, display_value)
+                    
+        elif input_type == 'k_amount':
+            # K-prefixed amount (e.g., K50)
+            if messagebox.askyesno("Confirm K-Amount", f"Add {amount:.2f} EGP (K-Amount) to {self.current_card_uid}?\nCard will store: '{display_value}'\nMode: {mode}"):
+                self.status_var.set("Processing K-amount top-up...")
+                self.root.update_idletasks()
+                if self.manual_mode:
+                    self._manual_top_up(amount, display_value)
+                else:
+                    self._arduino_top_up(amount, display_value)
+                    
+        else:
+            # String input - only write to card
+            if messagebox.askyesno("Confirm", f"Write '{display_value}' to card {self.current_card_uid}?\nMode: {mode}\n\nNote: Balance will NOT be updated in database."):
+                self.status_var.set("Writing string to card...")
+                self.root.update_idletasks()
+                if self.manual_mode:
+                    messagebox.showinfo("Manual Mode", "String data can only be written in Arduino mode.\nManual mode only supports numeric balance updates.")
+                else:
+                    self._arduino_write_string(display_value)
 
-            if self.manual_mode:
-                self._manual_top_up(amount)
-            else:
-                self._arduino_top_up(amount)
-
-    def _manual_top_up(self, amount):
+    def _manual_top_up(self, amount, display_value):
         """Handle manual top-up."""
         try:
             new_bal, tx_id = self.db_service.top_up(
                 self.current_card_uid,
                 amount,
                 employee=self.config.get("employee_name", "Receptionist"),
-                notes="Manual entry"
+                notes=f"Manual entry: {display_value}"
             )
             self._update_balance(new_bal)
             
@@ -629,21 +714,41 @@ class ModernMainWindow:
             
             messagebox.showinfo(
                 "Success (Manual)",
-                f"Added {amount:.2f} EGP\nNew Balance: {new_bal:.2f} EGP\n(Note: Card not written)"
+                f"Added {amount:.2f} EGP\nNew Balance: {new_bal:.2f} EGP\n(Note: Physical card not updated)"
             )
         except Exception as e:
             logger.error(f"Manual top-up error: {e}")
             messagebox.showerror("DB Error", str(e))
 
-    def _arduino_top_up(self, amount):
-        """Handle Arduino top-up."""
-        success, uid, msg = self.serial_service.write_card(amount)
+    def _arduino_top_up(self, amount, display_value):
+        """Handle Arduino top-up with numeric value."""
+        # Show clear instructions with messagebox warning
+        result = messagebox.askokcancel(
+            "Important - Keep Card on Reader",
+            f"⚠️ PLEASE KEEP THE CARD ON THE READER!\n\n"
+            f"The system will now write '{display_value}' to the card.\n"
+            f"Do NOT remove the card until you see a success message.\n\n"
+            f"Click OK when the card is on the reader and you're ready.",
+            icon='warning'
+        )
+        
+        if not result:
+            self.status_var.set("Write operation cancelled")
+            return
+        
+        # Show clear instructions to user
+        self.status_var.set("⏳ Writing to card... KEEP CARD ON READER!")
+        self.root.update()
+        self.root.update_idletasks()
+        
+        success, uid, msg = self.serial_service.write_card(display_value)
         if success:
             try:
                 new_bal, tx_id = self.db_service.top_up(
                     self.current_card_uid,
                     amount,
-                    employee=self.config.get("employee_name", "Receptionist")
+                    employee=self.config.get("employee_name", "Receptionist"),
+                    notes=f"Arduino write: {display_value}"
                 )
                 self._update_balance(new_bal)
                 
@@ -651,12 +756,45 @@ class ModernMainWindow:
                 if self.auto_print_receipts:
                     self._print_receipt(self.current_card_uid, amount, new_bal, tx_id)
                 
-                messagebox.showinfo("Success", f"Added {amount:.2f} EGP\nNew Balance: {new_bal:.2f} EGP")
+                self.status_var.set(f"✓ Successfully wrote {display_value} to card!")
+                messagebox.showinfo("Success", f"Added {amount:.2f} EGP\nNew Balance: {new_bal:.2f} EGP\nCard data: '{msg.split(':')[-1]}'")
             except Exception as e:
                 logger.error(f"DB error after write: {e}")
+                self.status_var.set(f"❌ Database error: {str(e)}")
                 messagebox.showerror("DB Error", str(e))
         else:
-            messagebox.showerror("Write Failed", msg)
+            self.status_var.set(f"❌ Write failed: {msg}")
+            logger.warning(f"Write failed: {msg}")
+    
+    def _arduino_write_string(self, text_data):
+        """Handle Arduino string write (no database update)."""
+        # Show clear instructions with messagebox warning
+        result = messagebox.askokcancel(
+            "Important - Keep Card on Reader",
+            f"⚠️ PLEASE KEEP THE CARD ON THE READER!\n\n"
+            f"The system will now write '{text_data}' to the card.\n"
+            f"Do NOT remove the card until you see a success message.\n\n"
+            f"Click OK when the card is on the reader and you're ready.",
+            icon='warning'
+        )
+        
+        if not result:
+            self.status_var.set("Write operation cancelled")
+            return
+        
+        # Show clear instructions to user
+        self.status_var.set(f"⏳ Writing '{text_data}' to card... KEEP CARD ON READER!")
+        self.root.update()
+        self.root.update_idletasks()
+        
+        success, uid, msg = self.serial_service.write_card(text_data)
+        if success:
+            self.status_var.set(f"✓ Successfully wrote '{text_data}' to card!")
+            self.amount_var.set("")
+            messagebox.showinfo("Success", f"String '{text_data}' written to card!\nCard UID: {uid}\n\nNote: Database balance NOT updated.")
+        else:
+            self.status_var.set(f"❌ Write failed: {msg}")
+            logger.warning(f"Write failed: {msg}")
 
     def _update_balance(self, new_balance):
         """Update balance display."""
@@ -991,19 +1129,38 @@ class ModernMainWindow:
             messagebox.showwarning("No Card", "Read or load a card first.")
             return
 
-        try:
-            amount = float(self.amount_var.get() or 0)
-            if amount < 0:
-                raise ValueError("Amount cannot be negative")
-        except ValueError:
-            messagebox.showerror("Invalid Amount", "Enter a valid number (0 or more).")
+        input_value = self.amount_var.get().strip()
+        if not input_value:
+            messagebox.showerror("Empty Input", "Please enter a value.")
+            return
+        
+        # Check if input is too long
+        if len(input_value) > 11:
+            messagebox.showerror("Input Too Long", "Maximum 11 characters allowed.")
+            return
+
+        # Parse input
+        input_type, amount, display_value = self._parse_input(input_value)
+        
+        if input_type == 'string':
+            messagebox.showerror("Invalid Input", "Set Balance only accepts numeric values or K-amounts (e.g., 50 or K50).\nFor text, use 'Add to Balance' button.")
+            return
+        
+        if amount < 0:
+            messagebox.showerror("Invalid Amount", "Amount cannot be negative.")
             return
 
         mode = "Manual" if self.manual_mode else "Arduino"
         current_balance = self.current_balance
         difference = amount - current_balance
         
-        msg = f"Set balance to {amount:.2f} EGP?\n\n"
+        prefix = "K-" if input_type == 'k_amount' else ""
+        msg = f"Set balance to {amount:.2f} EGP ({prefix}Amount)?\n"
+        if input_type == 'k_amount':
+            msg += f"Card will store: '{display_value}'\n\n"
+        else:
+            msg += "\n"
+            
         if difference > 0:
             msg += f"This will ADD {difference:.2f} EGP to the card.\n"
         elif difference < 0:
@@ -1017,11 +1174,11 @@ class ModernMainWindow:
             self.root.update_idletasks()
 
             if self.manual_mode:
-                self._manual_write_balance(amount, difference)
+                self._manual_write_balance(amount, difference, display_value)
             else:
-                self._arduino_write_balance(amount, difference)
+                self._arduino_write_balance(amount, difference, display_value)
     
-    def _manual_write_balance(self, new_balance, difference):
+    def _manual_write_balance(self, new_balance, difference, display_value):
         """Handle manual balance write."""
         try:
             # Use top_up with the difference (can be negative for deductions)
@@ -1030,7 +1187,7 @@ class ModernMainWindow:
                     self.current_card_uid,
                     difference,
                     employee=self.config.get("employee_name", "Receptionist"),
-                    notes=f"Balance set to {new_balance:.2f} (Manual entry)"
+                    notes=f"Balance set to {new_balance:.2f} ({display_value}) - Manual entry"
                 )
                 self._update_balance(final_balance)
                 
@@ -1040,7 +1197,7 @@ class ModernMainWindow:
                 
                 messagebox.showinfo(
                     "Success (Manual)",
-                    f"Balance set to {new_balance:.2f} EGP\n(Note: Physical card not updated in manual mode)"
+                    f"Balance set to {new_balance:.2f} EGP\nCard value: {display_value}\n(Note: Physical card not updated in manual mode)"
                 )
             else:
                 messagebox.showinfo("No Change", "Balance is already at the specified amount.")
@@ -1048,10 +1205,29 @@ class ModernMainWindow:
             logger.error(f"Manual balance write error: {e}")
             messagebox.showerror("DB Error", str(e))
     
-    def _arduino_write_balance(self, new_balance, difference):
+    def _arduino_write_balance(self, new_balance, difference, display_value):
         """Handle Arduino balance write."""
-        # For Arduino mode, we write the new balance to the card
-        success, uid, msg = self.serial_service.write_card(new_balance)
+        # Show clear instructions with messagebox warning
+        result = messagebox.askokcancel(
+            "Important - Keep Card on Reader",
+            f"⚠️ PLEASE KEEP THE CARD ON THE READER!\n\n"
+            f"The system will now write '{display_value}' to the card.\n"
+            f"Do NOT remove the card until you see a success message.\n\n"
+            f"Click OK when the card is on the reader and you're ready.",
+            icon='warning'
+        )
+        
+        if not result:
+            self.status_var.set("Write operation cancelled")
+            return
+        
+        # Show clear instructions
+        self.status_var.set(f"⏳ Writing '{display_value}' to card... KEEP CARD ON READER!")
+        self.root.update()
+        self.root.update_idletasks()
+        
+        # Write the display value to the card (e.g., "50" or "K50")
+        success, uid, msg = self.serial_service.write_card(display_value)
         if success:
             try:
                 # Update database with the difference
@@ -1060,7 +1236,7 @@ class ModernMainWindow:
                         self.current_card_uid,
                         difference,
                         employee=self.config.get("employee_name", "Receptionist"),
-                        notes=f"Balance set to {new_balance:.2f} (Arduino write)"
+                        notes=f"Balance set to {new_balance:.2f} ({display_value}) - Arduino write"
                     )
                     self._update_balance(final_balance)
                     
@@ -1068,14 +1244,129 @@ class ModernMainWindow:
                     if self.auto_print_receipts:
                         self._print_receipt(self.current_card_uid, difference, final_balance, tx_id)
                     
-                    messagebox.showinfo("Success", f"Balance set to {new_balance:.2f} EGP\nPhysical card updated successfully.")
+                    self.status_var.set(f"✓ Successfully wrote '{display_value}' to card!")
+                    messagebox.showinfo("Success", f"Balance set to {new_balance:.2f} EGP\nCard data: '{display_value}'\nPhysical card updated successfully.")
                 else:
-                    messagebox.showinfo("No Change", "Balance is already at the specified amount.")
+                    self.status_var.set(f"✓ Card updated with '{display_value}'")
+                    messagebox.showinfo("No Change", f"Balance is already at the specified amount.\nCard updated with: '{display_value}'")
             except Exception as e:
                 logger.error(f"DB error after write: {e}")
+                self.status_var.set(f"❌ Database error: {str(e)}")
                 messagebox.showerror("DB Error", str(e))
         else:
-            messagebox.showerror("Write Failed", msg)
+            self.status_var.set(f"❌ Write failed: {msg}")
+            logger.warning(f"Write failed: {msg}")
+    
+    def _toggle_auto_scan(self):
+        """Toggle auto-scan mode on/off."""
+        if self.auto_scan_enabled:
+            # Disable auto-scan
+            self._stop_auto_scan()
+        else:
+            # Enable auto-scan
+            self._start_auto_scan()
+    
+    def _start_auto_scan(self):
+        """Start automatic card scanning."""
+        if not self.serial_service.is_connected:
+            messagebox.showwarning(
+                "Arduino Not Connected",
+                "Please connect to Arduino before enabling auto-scan.\n\n"
+                "Go to Settings → Configure Serial to connect."
+            )
+            return
+        
+        if self.manual_mode:
+            messagebox.showwarning(
+                "Manual Mode Active",
+                "Auto-scan is not available in Manual Mode.\n\n"
+                "Disable Manual Mode first to use auto-scan."
+            )
+            return
+        
+        self.auto_scan_enabled = True
+        self.last_scanned_uid = None
+        self.auto_scan_btn.config(
+            text="⏸️ Disable Auto-Scan",
+            bg=WARNING_COLOR
+        )
+        self.status_var.set("🔄 Auto-scan enabled - Place card on reader...")
+        logger.info("Auto-scan enabled")
+        
+        # Start the scanning loop
+        self._auto_scan_loop()
+    
+    def _stop_auto_scan(self):
+        """Stop automatic card scanning."""
+        self.auto_scan_enabled = False
+        if self.auto_scan_job:
+            self.root.after_cancel(self.auto_scan_job)
+            self.auto_scan_job = None
+        
+        self.auto_scan_btn.config(
+            text="⚡ Enable Auto-Scan",
+            bg=SUCCESS_COLOR
+        )
+        self.status_var.set("Auto-scan disabled")
+        logger.info("Auto-scan disabled")
+    
+    def _auto_scan_loop(self):
+        """Continuously scan for cards."""
+        if not self.auto_scan_enabled:
+            return
+        
+        try:
+            # Only scan if Arduino is connected
+            if self.serial_service.is_connected:
+                # Read card without showing loading message
+                success, result = self.serial_service.read_card()
+                
+                if success:
+                    # Parse UID
+                    raw_data = result.strip()
+                    if ':' in raw_data:
+                        card_uid = raw_data.split(':')[0]
+                    else:
+                        card_uid = raw_data
+                    
+                    # Format UID
+                    card_uid = self._format_card_uid(card_uid)
+                    
+                    # Only process if it's a different card
+                    if card_uid != self.last_scanned_uid:
+                        self.last_scanned_uid = card_uid
+                        logger.info(f"Auto-scan detected card: {card_uid}")
+                        
+                        # Check if new card
+                        is_new_card = not self._card_exists_in_db(card_uid)
+                        
+                        # Create or get card from database
+                        card = self.db_service.create_or_get_card(card_uid)
+                        balance = card['balance']
+                        
+                        # Update UI
+                        self.current_card_uid = card_uid
+                        self.card_uid_var.set(card_uid)
+                        self.current_balance = balance
+                        self.balance_var.set(f"{balance:.2f} EGP")
+                        
+                        # Log the event
+                        self._log_card_read(card_uid, is_new=is_new_card)
+                        
+                        # Update status
+                        if is_new_card:
+                            self.status_var.set(f"✨ New card detected: {card_uid} | Balance: {balance:.2f} EGP")
+                        else:
+                            self.status_var.set(f"✓ Card detected: {card_uid} | Balance: {balance:.2f} EGP")
+                        
+                        logger.info(f"Auto-scan loaded: {card_uid}, Balance: {balance:.2f} EGP, New: {is_new_card}")
+        
+        except Exception as e:
+            logger.error(f"Auto-scan error: {e}")
+            # Don't stop auto-scan on error, just log it
+        
+        # Schedule next scan (every 1 second)
+        self.auto_scan_job = self.root.after(1000, self._auto_scan_loop)
 
 
 # Backward compatibility alias
