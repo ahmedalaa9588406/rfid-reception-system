@@ -322,6 +322,9 @@ class ReceiptPrinter:
         c.drawCentredString(x_center, y, "Please keep this receipt for your records")
         y -= 4 * mm
         c.drawCentredString(x_center, y, "For support, contact reception")
+        
+        # IMPORTANT: Show the page to finalize the content
+        c.showPage()
     
     def print_card_summary(self, card_data: Dict[str, Any], 
                           transactions: list = None) -> tuple[bool, str]:
@@ -416,5 +419,12 @@ class ReceiptPrinter:
                            f"Balance: {txn.get('balance_after', 0):.2f} EGP")
                 c.drawString(margin + 0.2 * inch, y, txn_line)
                 y -= 0.18 * inch
+                
+                # Check if we need a new page
+                if y < margin:
+                    c.showPage()
+                    y = height - margin
+                    c.setFont("Helvetica", 10)
         
+        # IMPORTANT: Show the page to finalize the content
         c.showPage()

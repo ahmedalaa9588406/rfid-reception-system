@@ -897,10 +897,12 @@ class ModernMainWindow:
             )
             
             if success:
-                messagebox.showinfo("Receipt Saved", f"Receipt saved to:\n{result}")
-                # Optionally open the PDF
-                if messagebox.askyesno("Open Receipt", "Would you like to open the receipt?"):
+                # Auto-open the PDF
+                try:
                     os.startfile(result)
+                    messagebox.showinfo("Receipt Generated", f"Receipt opened successfully!\n\nSaved to:\n{result}")
+                except Exception as e:
+                    messagebox.showinfo("Receipt Saved", f"Receipt saved to:\n{result}\n\nPlease open it manually.")
             else:
                 messagebox.showerror("Print Failed", result)
         except Exception as e:
@@ -924,9 +926,12 @@ class ModernMainWindow:
             )
             
             if success:
-                messagebox.showinfo("Summary Saved", f"Card summary saved to:\n{result}")
-                if messagebox.askyesno("Open Summary", "Would you like to open the summary?"):
+                # Auto-open the PDF
+                try:
                     os.startfile(result)
+                    messagebox.showinfo("Summary Generated", f"Card summary opened successfully!\n\nSaved to:\n{result}")
+                except Exception as e:
+                    messagebox.showinfo("Summary Saved", f"Card summary saved to:\n{result}\n\nPlease open it manually.")
             else:
                 messagebox.showerror("Print Failed", result)
         except Exception as e:
@@ -1018,7 +1023,8 @@ class ModernMainWindow:
             date_str = simpledialog.askstring(
                 "Daily Report", "Enter date (YYYY-MM-DD) or leave blank for today:", parent=self.root
             )
-            # Compute default filename
+            
+            # Compute date
             if date_str:
                 try:
                     d = datetime.strptime(date_str, '%Y-%m-%d').date()
@@ -1028,22 +1034,24 @@ class ModernMainWindow:
             else:
                 d = datetime.now().date()
 
-            default_name = f"daily_report_{d.strftime('%Y%m%d')}.pdf"
-            save_path = filedialog.asksaveasfilename(
-                title="Save Daily Report As",
-                defaultextension=".pdf",
-                filetypes=[("PDF files", "*.pdf")],
-                initialfile=default_name,
-                parent=self.root
-            )
-            if not save_path:
-                return
+            # Auto-generate filename in reports folder
+            reports_dir = os.path.join(os.getcwd(), "reports")
+            os.makedirs(reports_dir, exist_ok=True)
+            
+            filename = f"daily_report_{d.strftime('%Y%m%d')}.pdf"
+            save_path = os.path.join(reports_dir, filename)
 
             if date_str:
                 path = self.reports_generator.generate_daily_report(date_str, output_path=save_path)
             else:
                 path = self.reports_generator.generate_daily_report(output_path=save_path)
-            messagebox.showinfo("Daily Report", f"Generated:\n{path}")
+            
+            # Auto-open the PDF
+            try:
+                os.startfile(path)
+                messagebox.showinfo("Daily Report", f"Report opened successfully!\n\nSaved to:\n{path}")
+            except Exception as e:
+                messagebox.showinfo("Daily Report", f"Report generated:\n{path}\n\nPlease open it manually.")
         except Exception as e:
             logger.error(f"Daily report error: {e}")
             messagebox.showerror("Daily Report", str(e))
@@ -1056,7 +1064,8 @@ class ModernMainWindow:
                 "Enter week start (YYYY-MM-DD, Monday). Leave blank for current week:",
                 parent=self.root
             )
-            # Determine start/end for default filename
+            
+            # Determine start/end
             if week_start:
                 try:
                     start = datetime.strptime(week_start, '%Y-%m-%d').date()
@@ -1068,22 +1077,24 @@ class ModernMainWindow:
                 start = today - timedelta(days=today.weekday())
             end = start + timedelta(days=6)
 
-            default_name = f"weekly_report_{start.strftime('%Y%m%d')}_to_{end.strftime('%Y%m%d')}.pdf"
-            save_path = filedialog.asksaveasfilename(
-                title="Save Weekly Report As",
-                defaultextension=".pdf",
-                filetypes=[("PDF files", "*.pdf")],
-                initialfile=default_name,
-                parent=self.root
-            )
-            if not save_path:
-                return
+            # Auto-generate filename in reports folder
+            reports_dir = os.path.join(os.getcwd(), "reports")
+            os.makedirs(reports_dir, exist_ok=True)
+            
+            filename = f"weekly_report_{start.strftime('%Y%m%d')}_to_{end.strftime('%Y%m%d')}.pdf"
+            save_path = os.path.join(reports_dir, filename)
 
             if week_start:
                 path = self.reports_generator.generate_weekly_report(week_start, output_path=save_path)
             else:
                 path = self.reports_generator.generate_weekly_report(output_path=save_path)
-            messagebox.showinfo("Weekly Report", f"Generated:\n{path}")
+            
+            # Auto-open the PDF
+            try:
+                os.startfile(path)
+                messagebox.showinfo("Weekly Report", f"Report opened successfully!\n\nSaved to:\n{path}")
+            except Exception as e:
+                messagebox.showinfo("Weekly Report", f"Report generated:\n{path}\n\nPlease open it manually.")
         except Exception as e:
             logger.error(f"Weekly report error: {e}")
             messagebox.showerror("Weekly Report", str(e))
@@ -1102,18 +1113,22 @@ class ModernMainWindow:
                 m = datetime.now().month
             if not y:
                 y = datetime.now().year
-            default_name = f"monthly_report_{y}{m:02d}.pdf"
-            save_path = filedialog.asksaveasfilename(
-                title="Save Monthly Report As",
-                defaultextension=".pdf",
-                filetypes=[("PDF files", "*.pdf")],
-                initialfile=default_name,
-                parent=self.root
-            )
-            if not save_path:
-                return
+            
+            # Auto-generate filename in reports folder
+            reports_dir = os.path.join(os.getcwd(), "reports")
+            os.makedirs(reports_dir, exist_ok=True)
+            
+            filename = f"monthly_report_{y}{m:02d}.pdf"
+            save_path = os.path.join(reports_dir, filename)
+            
             path = self.reports_generator.generate_monthly_report(m, y, output_path=save_path)
-            messagebox.showinfo("Monthly Report", f"Generated:\n{path}")
+            
+            # Auto-open the PDF
+            try:
+                os.startfile(path)
+                messagebox.showinfo("Monthly Report", f"Report opened successfully!\n\nSaved to:\n{path}")
+            except Exception as e:
+                messagebox.showinfo("Monthly Report", f"Report generated:\n{path}\n\nPlease open it manually.")
         except Exception as e:
             logger.error(f"Monthly report error: {e}")
             messagebox.showerror("Monthly Report", str(e))
@@ -1126,18 +1141,22 @@ class ModernMainWindow:
             )
             if not y:
                 y = datetime.now().year
-            default_name = f"yearly_report_{y}.pdf"
-            save_path = filedialog.asksaveasfilename(
-                title="Save Yearly Report As",
-                defaultextension=".pdf",
-                filetypes=[("PDF files", "*.pdf")],
-                initialfile=default_name,
-                parent=self.root
-            )
-            if not save_path:
-                return
+            
+            # Auto-generate filename in reports folder
+            reports_dir = os.path.join(os.getcwd(), "reports")
+            os.makedirs(reports_dir, exist_ok=True)
+            
+            filename = f"yearly_report_{y}.pdf"
+            save_path = os.path.join(reports_dir, filename)
+            
             path = self.reports_generator.generate_yearly_report(y, output_path=save_path)
-            messagebox.showinfo("Yearly Report", f"Generated:\n{path}")
+            
+            # Auto-open the PDF
+            try:
+                os.startfile(path)
+                messagebox.showinfo("Yearly Report", f"Report opened successfully!\n\nSaved to:\n{path}")
+            except Exception as e:
+                messagebox.showinfo("Yearly Report", f"Report generated:\n{path}\n\nPlease open it manually.")
         except Exception as e:
             logger.error(f"Yearly report error: {e}")
             messagebox.showerror("Yearly Report", str(e))
