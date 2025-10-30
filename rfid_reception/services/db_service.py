@@ -23,7 +23,7 @@ class DatabaseService:
         try:
             card = session.query(Card).filter_by(card_uid=card_uid).first()
             if not card:
-                card = Card(card_uid=card_uid, balance=0.0)
+                card = Card(card_uid=card_uid, balance=0.0, offer_percent=0.0)
                 session.add(card)
                 session.commit()
                 logger.info(f"Created new card: {card_uid}")
@@ -33,6 +33,7 @@ class DatabaseService:
                 'id': card.id,
                 'card_uid': card.card_uid,
                 'balance': card.balance,
+                'offer_percent': card.offer_percent,  # NEW: Include offer_percent
                 'created_at': card.created_at,
                 'last_topped_at': card.last_topped_at
             }
@@ -142,6 +143,7 @@ class DatabaseService:
                     'id': c.id,
                     'card_uid': c.card_uid,
                     'balance': c.balance,
+                    'offer_percent': c.offer_percent,  # NEW: Include offer_percent
                     'created_at': c.created_at,
                     'last_topped_at': c.last_topped_at,
                     'employee_name': employee_name
@@ -207,6 +209,33 @@ class DatabaseService:
         except SQLAlchemyError as e:
             session.rollback()
             logger.error(f"Error deleting card {card_uid}: {e}")
+            raise
+        finally:
+            session.close()
+    
+    # NEW METHOD: Update offer percentage for a card
+    def update_card_offer(self, card_uid, offer_percent):
+        """Update the offer percentage for a card.
+        
+        Args:
+            card_uid: The card UID
+            offer_percent: The offer percentage (0-100)
+        """
+        session = self.Session()
+        try:
+            card = session.query(Card).filter_by(card_uid=card_uid).first()
+            if not card:
+                logger.warning(f"Card {card_uid} not found for offer update")
+                return False
+            
+            card.offer_percent = offer_percent
+            session.commit()
+            
+            logger.info(f"Updated offer_percent to {offer_percent}% for card {card_uid}")
+            return True
+        except SQLAlchemyError as e:
+            session.rollback()
+            logger.error(f"Error updating offer percent: {e}")
             raise
         finally:
             session.close()

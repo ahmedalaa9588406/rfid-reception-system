@@ -237,33 +237,27 @@ class ModernMainWindow:
                             bg=CARD_BG)
         egp_label.pack(side='left', padx=10)
 
-        # Quick amount buttons
-        quick_frame = tk.Frame(parent, bg=CARD_BG)
-        quick_frame.pack(padx=15, pady=10, fill='x')
+        # Offer % input (new) -------------------------------------------------
+        offer_frame = tk.Frame(parent, bg=CARD_BG)
+        offer_frame.pack(padx=15, pady=(6, 10), fill='x')
 
-        quick_label = tk.Label(quick_frame,
-                              text="Quick Amounts:",
-                              font=('Segoe UI', 9),
-                              fg=TEXT_SECONDARY,
-                              bg=CARD_BG)
-        quick_label.pack(anchor='w', pady=(0, 5))
+        offer_label = tk.Label(offer_frame,
+                               text="🎁 Offer % (optional)",
+                               font=('Segoe UI', 10),
+                               fg=TEXT_SECONDARY,
+                               bg=CARD_BG)
+        offer_label.pack(side='left', padx=(0, 10))
 
-        amounts_button_frame = tk.Frame(quick_frame, bg=CARD_BG)
-        amounts_button_frame.pack(fill='x')
-
-        amounts = [10, 20, 50, 100]
-        for amount in amounts:
-            btn = tk.Button(amounts_button_frame,
-                           text=f"{amount} EGP",
-                           font=('Segoe UI', 9, 'bold'),
-                           bg=LIGHT_BG,
-                           fg=TEXT_PRIMARY,
-                           relief='flat',
-                           cursor='hand2',
-                           padx=10,
-                           pady=6,
-                           command=lambda a=amount: self.amount_var.set(str(a)))
-            btn.pack(side='left', padx=3, fill='x', expand=True)
+        self.offer_var = tk.StringVar(value="0")
+        offer_entry = tk.Entry(offer_frame,
+                               textvariable=self.offer_var,
+                               font=('Segoe UI', 12),
+                               width=6,
+                               relief='flat',
+                               bd=1)
+        offer_entry.configure(highlightbackground=BORDER_COLOR, highlightthickness=1)
+        offer_entry.pack(side='left', ipady=4)
+        # --------------------------------------------------------------------
 
         # Buttons frame
         buttons_frame = tk.Frame(parent, bg=CARD_BG)
@@ -743,27 +737,88 @@ class ModernMainWindow:
     def _manual_top_up(self, amount, display_value):
         """Handle manual top-up."""
         try:
+            # calculate and apply offer percent if provided
+            try:
+                offer_percent = float(self.offer_var.get() or 0)
+            except Exception:
+                offer_percent = 0.0
+            offer_percent = max(0.0, min(100.0, offer_percent))
+            offer_amount = round(amount * (offer_percent / 100.0), 2) if offer_percent > 0 else 0.0
+            total_amount = round(amount + offer_amount, 2)
+            
+            logger.info(f"Manual top-up: amount={amount}, offer_percent={offer_percent}, offer_amount={offer_amount}, total={total_amount}")
+            
             new_bal, tx_id = self.db_service.top_up(
                 self.current_card_uid,
-                amount,
+                total_amount,
                 employee=self.config.get("employee_name", "Receptionist"),
-                notes=f"Manual entry: {display_value}"
+                notes=f"Manual entry: {display_value} | Offer: {offer_percent:.2f}% (+{offer_amount:.2f})"
             )
-            self._update_balance(new_bal)
             
+            # CRITICAL FIX: ALWAYS store offer_percent (even if 0) to ensure it's tracked
+            try:
+                if hasattr(self.db_service, 'conn'):
+                    cursor = self.db_service.conn.cursor()
+                    # First ensure the column exists (safe operation - will skip if exists)
+                    try:
+                        cursor.execute(
+                            "ALTER TABLE cards ADD COLUMN offer_percent REAL DEFAULT 0"
+                        )
+                        self.db_service.conn.commit()
+                        logger.info("Created offer_percent column in cards table")
+                    except Exception as col_err:
+                        logger.debug(f"Column already exists: {col_err}")
+                    
+                    # Now ALWAYS update the value (even if 0)
+                    cursor.execute(
+                        "UPDATE cards SET offer_percent = ? WHERE card_uid = ?",
+                        (offer_percent, self.current_card_uid)
+                    )
+                    affected = cursor.rowcount
+                    self.db_service.conn.commit()
+                    cursor.close()
+                    logger.info(f"✓ Stored offer_percent={offer_percent}% for card {self.current_card_uid} (rows affected: {affected})")
+                    
+                    # VERIFY the update was successful
+                    cursor = self.db_service.conn.cursor()
+                    cursor.execute("SELECT offer_percent FROM cards WHERE card_uid = ?", (self.current_card_uid,))
+                    verify = cursor.fetchone()
+                    cursor.close()
+                    logger.info(f"VERIFICATION: offer_percent in DB is now {verify[0] if verify else 'NOT FOUND'}")
+                    
+                elif hasattr(self.db_service, 'update_card_offer'):
+                    self.db_service.update_card_offer(self.current_card_uid, offer_percent)
+                    logger.info(f"✓ Stored offer_percent={offer_percent}% for card {self.current_card_uid}")
+            except Exception as e:
+                logger.error(f"Failed to store offer_percent: {e}", exc_info=True)
+            
+            self._update_balance(new_bal)
+    
             # Print receipt if enabled (silent)
             if self.auto_print_receipts:
-                self._print_receipt(self.current_card_uid, amount, new_bal, tx_id)
-            
-            self.status_var.set(f"✓ Added {amount:.2f} EGP | New Balance: {new_bal:.2f} EGP (Manual)")
+                # send total amount (base + offer) to receipt
+                self._print_receipt(self.current_card_uid, total_amount, new_bal, tx_id)
+    
+            self.status_var.set(f"✓ Added {amount:.2f} EGP (offer: {offer_percent}%) | New Balance: {new_bal:.2f} EGP (Manual)")
         except Exception as e:
-            logger.error(f"Manual top-up error: {e}")
+            logger.error(f"Manual top-up error: {e}", exc_info=True)
             messagebox.showerror("DB Error", str(e))
 
     def _arduino_top_up(self, amount, display_value):
         """Handle Arduino top-up with numeric value."""
+        # compute offer and total
+        try:
+            offer_percent = float(self.offer_var.get() or 0)
+        except Exception:
+            offer_percent = 0.0
+        offer_percent = max(0.0, min(100.0, offer_percent))
+        offer_amount = round(amount * (offer_percent / 100.0), 2) if offer_percent > 0 else 0.0
+        total_amount = round(amount + offer_amount, 2)
+        
+        logger.info(f"Arduino top-up: amount={amount}, offer_percent={offer_percent}, offer_amount={offer_amount}, total={total_amount}")
+
         # Calculate new balance BEFORE writing to card
-        new_balance_expected = self.current_balance + amount
+        new_balance_expected = self.current_balance + total_amount
         
         # Determine what to write to card (new total balance)
         if display_value.startswith('K'):
@@ -780,25 +835,64 @@ class ModernMainWindow:
             try:
                 new_bal, tx_id = self.db_service.top_up(
                     self.current_card_uid,
-                    amount,
+                    total_amount,
                     employee=self.config.get("employee_name", "Receptionist"),
-                    notes=f"Arduino write: {card_write_value} (added {amount:.2f})"
+                    notes=f"Arduino write: {card_write_value} (added {amount:.2f} + offer {offer_amount:.2f} [{offer_percent:.2f}%])"
                 )
+                
+                # CRITICAL FIX: ALWAYS store offer_percent (even if 0) to ensure it's tracked
+                try:
+                    if hasattr(self.db_service, 'conn'):
+                        cursor = self.db_service.conn.cursor()
+                        # First ensure the column exists (safe operation - will skip if exists)
+                        try:
+                            cursor.execute(
+                                "ALTER TABLE cards ADD COLUMN offer_percent REAL DEFAULT 0"
+                            )
+                            self.db_service.conn.commit()
+                            logger.info("Created offer_percent column in cards table")
+                        except Exception as col_err:
+                            logger.debug(f"Column already exists: {col_err}")
+                    
+                        # Now ALWAYS update the value (even if 0)
+                        cursor.execute(
+                            "UPDATE cards SET offer_percent = ? WHERE card_uid = ?",
+                            (offer_percent, self.current_card_uid)
+                        )
+                        affected = cursor.rowcount
+                        self.db_service.conn.commit()
+                        cursor.close()
+                        logger.info(f"✓ Stored offer_percent={offer_percent}% for card {self.current_card_uid} (rows affected: {affected})")
+                        
+                        # VERIFY the update was successful
+                        cursor = self.db_service.conn.cursor()
+                        cursor.execute("SELECT offer_percent FROM cards WHERE card_uid = ?", (self.current_card_uid,))
+                        verify = cursor.fetchone()
+                        cursor.close()
+                        logger.info(f"VERIFICATION: offer_percent in DB is now {verify[0] if verify else 'NOT FOUND'}")
+                        
+                    elif hasattr(self.db_service, 'update_card_offer'):
+                        self.db_service.update_card_offer(self.current_card_uid, offer_percent)
+                        logger.info(f"✓ Stored offer_percent={offer_percent}% for card {self.current_card_uid}")
+                except Exception as e:
+                    logger.error(f"Failed to store offer_percent: {e}", exc_info=True)
+                
                 self._update_balance(new_bal)
                 
                 # Print receipt if enabled (silent)
                 if self.auto_print_receipts:
-                    self._print_receipt(self.current_card_uid, amount, new_bal, tx_id)
+                    # print total (base + offer)
+                    self._print_receipt(self.current_card_uid, total_amount, new_bal, tx_id)
                 
-                self.status_var.set(f"✓ Added {amount:.2f} EGP | New Balance: {new_bal:.2f} EGP | Card: '{card_write_value}'")
+                self.status_var.set(f"✓ Added {total_amount:.2f} EGP ({amount:.2f}+offer {offer_amount:.2f} [{offer_percent}%]) | Balance: {new_bal:.2f} EGP")
             except Exception as e:
-                logger.error(f"DB error after write: {e}")
+                logger.error(f"DB error after write: {e}", exc_info=True)
                 self.status_var.set(f"❌ Database error: {str(e)}")
                 messagebox.showerror("DB Error", str(e))
         else:
             self.status_var.set(f"❌ Write failed: {msg}")
             logger.warning(f"Write failed: {msg}")
-    
+
     def _arduino_write_string(self, text_data):
         """Handle Arduino string write (no database update)."""
         # Show clear instructions to user
@@ -1397,9 +1491,11 @@ class ModernMainWindow:
                                 logger.info(f"✓ Auto-scan synced: {db_balance} → {balance}")
                             else:
                                 balance = db_balance
+                                logger.info(f"✓ Auto-scan: Card and database already in sync: {balance}")
                         else:
                             # No card data, use database
                             balance = db_balance
+                            logger.info(f"Auto-scan: Card has no numeric data, using database balance: {balance}")
                         
                         # Update UI
                         self.current_card_uid = card_uid

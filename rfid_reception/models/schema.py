@@ -14,13 +14,14 @@ class Card(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     card_uid = Column(String, unique=True, nullable=False, index=True)
     balance = Column(Float, default=0.0)
+    offer_percent = Column(Float, default=0.0)  # NEW: Offer percentage field
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     last_topped_at = Column(DateTime, nullable=True)
     
     transactions = relationship("Transaction", back_populates="card", cascade="all, delete-orphan")
     
     def __repr__(self):
-        return f"<Card(card_uid='{self.card_uid}', balance={self.balance})>"
+        return f"<Card(card_uid='{self.card_uid}', balance={self.balance}, offer_percent={self.offer_percent})>"
 
 
 class Transaction(Base):

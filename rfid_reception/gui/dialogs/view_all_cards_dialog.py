@@ -714,6 +714,7 @@ class ModernReportsGenerator:
         # Add header row with RTL processing
         header_row = [
             self._bidi_process("الرصيد (جنيه)"),
+            self._bidi_process("نسبة العرض (%)"),
             self._bidi_process("آخر شحن"),
             self._bidi_process("تاريخ الإنشاء"),
             self._bidi_process("معرّف البطاقة")
@@ -732,21 +733,30 @@ class ModernReportsGenerator:
             last_topup_str = self._bidi_process(ArabicTextHelper.format_date_arabic(last_topup)) if last_topup else self._bidi_process('غير متاح')
             
             balance = self._bidi_process(ArabicTextHelper.format_currency_arabic(card.get('balance', 0)))
+            # Offer %
+            offer_pct = card.get('offer_percent', 0)
+            try:
+                offer_str = f"{float(offer_pct):.0f}%"
+            except Exception:
+                offer_str = str(offer_pct)
+            offer_display = self._bidi_process(offer_str)
             
             # Add row with proper RTL order (reversed from English order)
             cards_data.append([
                 balance,
+                offer_display,
                 last_topup_str,
                 created_str,
                 self._bidi_process(card_uid)
             ])
         
-        # Calculate column widths based on content
+        # Calculate column widths based on content (include offer column)
         col_widths = [
             1.2 * inch,  # Balance
-            2.0 * inch,  # Last top-up
-            2.0 * inch,  # Created at
-            1.5 * inch   # Card UID
+            0.8 * inch,  # Offer %
+            1.8 * inch,  # Last top-up
+            1.8 * inch,  # Created at
+            1.2 * inch   # Card UID
         ]
         
         # Create and style the cards table
@@ -846,9 +856,11 @@ class ViewAllCardsDialog(tk.Toplevel):
         # Configure window style
         self.configure(bg=self.LIGHT_BG)
         
-        # Fetch cards data
+        # Fetch cards data with offer_percent
         try:
             self.cards = self.db_service.get_all_cards()
+            # Ensure each card has offer_percent field by querying directly if needed
+            self._enrich_cards_with_offer_data()
         except AttributeError:
             self.cards = []
             logging.warning("db_service.get_all_cards() not found; using empty list")
@@ -858,6 +870,52 @@ class ViewAllCardsDialog(tk.Toplevel):
         self.setup_ui()
         self.protocol("WM_DELETE_WINDOW", self.on_close)
     
+    def _enrich_cards_with_offer_data(self):
+        """Fetch offer_percent from database for each card if missing."""
+        logger.info("Enriching cards with offer data...")
+        
+        # SQLAlchemy uses 'engine' to get raw connections
+        if not hasattr(self.db_service, 'engine'):
+            logger.error("Cannot access database engine!")
+            for card in self.cards:
+                card['offer_percent'] = 0
+            return
+        
+        # Get a raw connection from SQLAlchemy engine
+        conn = self.db_service.engine.raw_connection()
+        
+        try:
+            for card in self.cards:
+                card_uid = card.get('card_uid')
+                logger.debug(f"Processing card {card_uid}, current offer_percent: {card.get('offer_percent')}")
+                
+                try:
+                    cursor = conn.cursor()
+                    
+                    # Fetch the value directly
+                    cursor.execute(
+                        "SELECT offer_percent FROM cards WHERE card_uid = ?",
+                        (card_uid,)
+                    )
+                    result = cursor.fetchone()
+                    cursor.close()
+                    
+                    if result and result[0] is not None:
+                        fetched_value = float(result[0])
+                        card['offer_percent'] = fetched_value
+                        logger.debug(f"✓ Fetched offer_percent={fetched_value}% for card {card_uid}")
+                    else:
+                        card['offer_percent'] = 0.0
+                        logger.debug(f"Card {card_uid}: No offer_percent found, defaulting to 0%")
+                        
+                except Exception as e:
+                    logger.error(f"Error fetching offer_percent for {card_uid}: {e}", exc_info=True)
+                    card['offer_percent'] = 0.0
+        
+        finally:
+            conn.close()
+            logger.info("Finished enriching cards with offer data")
+
     def setup_styles(self):
         """Configure modern ttk styles."""
         style = ttk.Style()
@@ -1037,22 +1095,23 @@ class ViewAllCardsDialog(tk.Toplevel):
         scrollbar = ttk.Scrollbar(table_frame)
         scrollbar.pack(side='right', fill='y')
         
-        columns = ("UID", "Balance", "Employee", "Status")  # Removed "Created At" and "Last Top-Up"
+        # Add Offer % column to track offer percentage per card
+        columns = ("UID", "Balance", "Offer %", "Employee", "Status")
         self.tree = ttk.Treeview(table_frame, 
-                                columns=columns,
-                                show='headings',
-                                height=15,
-                                yscrollcommand=scrollbar.set)
+                                 columns=columns,
+                                 show='headings',
+                                 height=15,
+                                 yscrollcommand=scrollbar.set)
         
         scrollbar.config(command=self.tree.yview)
         
-        # Configure columns
-        col_widths = [140, 110, 130, 80]  # Adjusted for 4 columns
-        col_anchors = ['w', 'center', 'w', 'center']  # Adjusted for 4 columns
+        # Configure columns (adjust widths for 5 columns)
+        col_widths = [140, 110, 90, 130, 80]  # UID, Balance, Offer%, Employee, Status
+        col_anchors = ['w', 'center', 'center', 'w', 'center']
         
         for i, (col, width, anchor) in enumerate(zip(columns, col_widths, col_anchors)):
-            self.tree.heading(col, text=col)
-            self.tree.column(col, width=width, anchor=anchor)
+             self.tree.heading(col, text=col)
+             self.tree.column(col, width=width, anchor=anchor)
         
         # Add alternating row colors
         self.tree.tag_configure('oddrow', background=self.CARD_BG)
@@ -1068,6 +1127,8 @@ class ViewAllCardsDialog(tk.Toplevel):
         for item in self.tree.get_children():
             self.tree.delete(item)
         
+        logger.info(f"Populating table with {len(self.filtered_cards)} cards")
+        
         # Populate with filtered cards
         for i, card in enumerate(self.filtered_cards):
             uid = card.get('card_uid', 'N/A')
@@ -1077,16 +1138,31 @@ class ViewAllCardsDialog(tk.Toplevel):
             # Determine status
             status = "✓ Active" if balance > 0 else "⚠ Empty"
             
+            # Get offer percent - with detailed logging
+            offer_pct = card.get('offer_percent', 0)
+            logger.debug(f"Card {uid}: offer_percent from dict = {offer_pct}")
+            
+            try:
+                offer_display = f"{float(offer_pct):.0f}%" if offer_pct else "0%"
+            except Exception as e:
+                logger.error(f"Error formatting offer for {uid}: {e}")
+                offer_display = "0%"
+            
+            logger.debug(f"Card {uid}: Displaying offer as '{offer_display}'")
+            
             values = (
                 uid[:12] + '...' if len(uid) > 12 else uid,
                 f"EGP {balance:.2f}",
+                offer_display,
                 employee if employee != 'N/A' else 'N/A',
                 status
-            )  # Removed created_str and last_topup_str
-            
+            )
+
             tag = 'evenrow' if i % 2 == 0 else 'oddrow'
             self.tree.insert('', 'end', values=values, tags=(tag, 'positive' if balance > 0 else ''))
-    
+        
+        logger.info("Table population complete")
+
     def _create_footer(self):
         """Create footer with action buttons."""
         footer_frame = tk.Frame(self, bg=self.LIGHT_BG)
