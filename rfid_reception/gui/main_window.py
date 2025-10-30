@@ -452,7 +452,7 @@ class ModernMainWindow:
             self.status_var.set("Not connected to Arduino - Check settings")
 
     def _read_card(self):
-        """Read RFID card from Arduino with automatic database save."""
+        """Read RFID card from Arduino with automatic database sync from card value."""
         # Immediate feedback - button clicked
         self.status_var.set("⏳ Reading card... Please wait...")
         self.root.update()
@@ -474,7 +474,7 @@ class ModernMainWindow:
             success, result = self.serial_service.read_card()
 
             if success:
-                # Parse result - Arduino might send "UID:AMOUNT" format
+                # Parse result - Arduino sends "UID:AMOUNT" format if card has data
                 raw_data = result.strip()
                 card_amount = None
                 
@@ -484,12 +484,24 @@ class ModernMainWindow:
                     raw_uid = parts[0]
                     # Try to parse amount if present
                     if len(parts) > 1 and parts[1]:
-                        try:
-                            card_amount = float(parts[1])
-                            logger.info(f"Card contains amount data: UID={raw_uid}, Amount={card_amount}")
-                        except ValueError:
-                            logger.warning(f"Could not parse amount from: {parts[1]}")
-                            card_amount = None
+                        card_data_str = parts[1].strip()
+                        
+                        # Handle K-prefix (e.g., K50)
+                        if card_data_str.upper().startswith('K'):
+                            try:
+                                card_amount = float(card_data_str[1:])
+                                logger.info(f"Card contains K-amount data: UID={raw_uid}, Amount={card_amount}")
+                            except ValueError:
+                                logger.warning(f"Could not parse K-amount from: {card_data_str}")
+                                card_amount = None
+                        else:
+                            # Try to parse as regular number
+                            try:
+                                card_amount = float(card_data_str)
+                                logger.info(f"Card contains numeric data: UID={raw_uid}, Amount={card_amount}")
+                            except ValueError:
+                                logger.info(f"Card contains non-numeric data: {card_data_str}")
+                                card_amount = None
                 else:
                     raw_uid = raw_data
                 
@@ -497,35 +509,42 @@ class ModernMainWindow:
                 card_uid = self._format_card_uid(raw_uid)
                 
                 # Update status
-                self.status_var.set(f"⏳ Saving card {card_uid} to database...")
+                self.status_var.set(f"⏳ Syncing card {card_uid} with database...")
                 self.root.update_idletasks()
                 
                 # Check if this is a new card
                 is_new_card = not self._card_exists_in_db(card_uid)
                 
                 try:
-                    # Automatically create or get card from database
+                    # Get or create card from database
                     card = self.db_service.create_or_get_card(card_uid)
+                    db_balance = card['balance']
                     
-                    # If card contains amount data, write it to the card balance
-                    if card_amount is not None and card_amount > 0:
-                        logger.info(f"Card has stored amount: {card_amount}, setting as balance")
-                        # Calculate difference and update
-                        current_balance = card['balance']
-                        if card_amount != current_balance:
-                            difference = card_amount - current_balance
+                    # CRITICAL: Sync database with card's actual value
+                    if card_amount is not None and card_amount >= 0:
+                        # Card has valid numeric data - this is the SOURCE OF TRUTH
+                        if card_amount != db_balance:
+                            # Database is out of sync - update it to match the card
+                            difference = card_amount - db_balance
+                            
+                            logger.warning(f"⚠️ SYNC REQUIRED: Card={card_amount}, DB={db_balance}, Diff={difference}")
+                            
+                            # Update database to match card
                             balance, tx_id = self.db_service.top_up(
                                 card_uid,
                                 difference,
-                                employee=self.config.get("employee_name", "Receptionist"),
-                                notes=f"Balance read from card: {card_amount}"
+                                employee=self.config.get("employee_name", "System Auto-Sync"),
+                                notes=f"Auto-sync from card: Card value={card_amount}, DB was={db_balance}, Adjusted by={difference:+.2f}"
                             )
-                            logger.info(f"Updated balance from card data: {current_balance} -> {balance}")
+                            logger.info(f"✓ Database synced: {db_balance} → {balance} (matched card value)")
                         else:
-                            balance = current_balance
+                            # Already in sync
+                            balance = db_balance
+                            logger.info(f"✓ Card and database already in sync: {balance}")
                     else:
-                        # Get the actual balance from database
-                        balance = card['balance']
+                        # Card has no valid numeric data - use database balance
+                        balance = db_balance
+                        logger.info(f"Card has no numeric data, using database balance: {balance}")
                     
                     # Update UI with card information
                     self.current_card_uid = card_uid
@@ -539,19 +558,21 @@ class ModernMainWindow:
                     # Log the card read event (for audit)
                     self._log_card_read(card_uid, is_new=is_new_card)
                     
-                    # Update status bar with result (no popup)
-                    if is_new_card:
+                    # Update status bar with result
+                    if card_amount is not None and card_amount != db_balance:
+                        self.status_var.set(f"🔄 Card synced: {card_uid} | Balance: {balance:.2f} EGP (was {db_balance:.2f} in DB)")
+                    elif is_new_card:
                         self.status_var.set(f"✨ New card loaded: {card_uid} | Balance: {balance:.2f} EGP")
                     else:
                         self.status_var.set(f"✓ Card loaded: {card_uid} | Balance: {balance:.2f} EGP")
                     
-                    logger.info(f"Card read and saved: {card_uid}, Balance: {balance:.2f} EGP, New: {is_new_card}")
+                    logger.info(f"Card read and synced: {card_uid}, Balance: {balance:.2f} EGP, New: {is_new_card}")
                     
                     # Automatically read and display card history
                     self._read_and_show_history(card_uid)
                     
                 except Exception as e:
-                    logger.error(f"Database error while saving card: {e}")
+                    logger.error(f"Database error while processing card: {e}")
                     self.status_var.set(f"❌ Database error: {str(e)}")
                     self.root.update_idletasks()
             else:
@@ -1376,7 +1397,7 @@ class ModernMainWindow:
         logger.info("Auto-scan disabled")
     
     def _auto_scan_loop(self):
-        """Continuously scan for cards."""
+        """Continuously scan for cards with automatic sync."""
         if not self.auto_scan_enabled:
             return
         
@@ -1387,10 +1408,30 @@ class ModernMainWindow:
                 success, result = self.serial_service.read_card()
                 
                 if success:
-                    # Parse UID
+                    # Parse UID and amount
                     raw_data = result.strip()
+                    card_amount = None
+                    
                     if ':' in raw_data:
-                        card_uid = raw_data.split(':')[0]
+                        parts = raw_data.split(':')
+                        card_uid = parts[0]
+                        
+                        # Try to parse amount if present
+                        if len(parts) > 1 and parts[1]:
+                            card_data_str = parts[1].strip()
+                            
+                            # Handle K-prefix (e.g., K50)
+                            if card_data_str.upper().startswith('K'):
+                                try:
+                                    card_amount = float(card_data_str[1:])
+                                except ValueError:
+                                    card_amount = None
+                            else:
+                                # Try to parse as regular number
+                                try:
+                                    card_amount = float(card_data_str)
+                                except ValueError:
+                                    card_amount = None
                     else:
                         card_uid = raw_data
                     
@@ -1407,7 +1448,29 @@ class ModernMainWindow:
                         
                         # Create or get card from database
                         card = self.db_service.create_or_get_card(card_uid)
-                        balance = card['balance']
+                        db_balance = card['balance']
+                        
+                        # CRITICAL: Sync database with card's actual value
+                        if card_amount is not None and card_amount >= 0:
+                            # Card has valid numeric data - sync database
+                            if card_amount != db_balance:
+                                # Database is out of sync - update it
+                                difference = card_amount - db_balance
+                                
+                                logger.warning(f"⚠️ AUTO-SCAN SYNC: Card={card_amount}, DB={db_balance}, Diff={difference}")
+                                
+                                balance, tx_id = self.db_service.top_up(
+                                    card_uid,
+                                    difference,
+                                    employee=self.config.get("employee_name", "System Auto-Sync"),
+                                    notes=f"Auto-sync from card (auto-scan): Card value={card_amount}, DB was={db_balance}, Adjusted by={difference:+.2f}"
+                                )
+                                logger.info(f"✓ Auto-scan synced: {db_balance} → {balance}")
+                            else:
+                                balance = db_balance
+                        else:
+                            # No card data, use database
+                            balance = db_balance
                         
                         # Update UI
                         self.current_card_uid = card_uid
@@ -1419,7 +1482,9 @@ class ModernMainWindow:
                         self._log_card_read(card_uid, is_new=is_new_card)
                         
                         # Update status
-                        if is_new_card:
+                        if card_amount is not None and card_amount != db_balance:
+                            self.status_var.set(f"🔄 Card synced: {card_uid} | Balance: {balance:.2f} EGP (was {db_balance:.2f})")
+                        elif is_new_card:
                             self.status_var.set(f"✨ New card detected: {card_uid} | Balance: {balance:.2f} EGP")
                         else:
                             self.status_var.set(f"✓ Card detected: {card_uid} | Balance: {balance:.2f} EGP")
