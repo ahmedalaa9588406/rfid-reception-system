@@ -36,7 +36,7 @@ class CardHistoryDialog:
         
         # Create dialog window
         self.dialog = tk.Toplevel(parent)
-        self.dialog.title("📜 Card Game History")
+        self.dialog.title("📜 سجل ألعاب البطاقة")
         self.dialog.geometry("800x600")
         self.dialog.configure(bg=LIGHT_BG)
         self.dialog.transient(parent)
@@ -65,7 +65,7 @@ class CardHistoryDialog:
         
         header_label = tk.Label(
             header_frame,
-            text="📜 Card Game History",
+            text="📜 سجل ألعاب البطاقة",
             font=('Segoe UI', 18, 'bold'),
             fg='white',
             bg=PRIMARY_COLOR
@@ -80,22 +80,22 @@ class CardHistoryDialog:
         # Card UID label
         self.uid_label = tk.Label(
             info_frame,
-            text="Card UID: Loading...",
+            text="رقم البطاقة: جاري التحميل...",
             font=('Segoe UI', 11, 'bold'),
             fg=TEXT_PRIMARY,
             bg=CARD_BG,
-            anchor='w'
+            anchor='e'
         )
         self.uid_label.pack(padx=15, pady=10, fill='x')
         
         # Instructions
         instructions_label = tk.Label(
             info_frame,
-            text="Game history shows all games played with this card (Game ID : Price)",
+            text="يُظهر سجل الألعاب جميع الألعاب التي تم لعبها بهذه البطاقة (رقم اللعبة : السعر)",
             font=('Segoe UI', 9),
             fg=TEXT_SECONDARY,
             bg=CARD_BG,
-            anchor='w'
+            anchor='e'
         )
         instructions_label.pack(padx=15, pady=(0, 10), fill='x')
         
@@ -107,12 +107,12 @@ class CardHistoryDialog:
         # Title for history table
         table_title = tk.Label(
             content_frame,
-            text="🎮 Game History by Block",
+            text="🎮 سجل الألعاب حسب الكتلة",
             font=('Segoe UI', 12, 'bold'),
             fg=PRIMARY_COLOR,
             bg=CARD_BG
         )
-        table_title.pack(padx=15, pady=(15, 10), anchor='w')
+        table_title.pack(padx=15, pady=(15, 10), anchor='e')
         
         # Create treeview with scrollbar
         tree_frame = tk.Frame(content_frame, bg=CARD_BG)
@@ -136,15 +136,15 @@ class CardHistoryDialog:
         hsb.config(command=self.tree.xview)
         
         # Configure columns
-        self.tree.heading('Block', text='Block #')
-        self.tree.heading('Game ID', text='Game ID')
-        self.tree.heading('Price', text='Price (EGP)')
-        self.tree.heading('Full Entry', text='Raw Entry')
+        self.tree.heading('Block', text='رقم الكتلة')
+        self.tree.heading('Game ID', text='رقم اللعبة')
+        self.tree.heading('Price', text='السعر (جنيه)')
+        self.tree.heading('Full Entry', text='الإدخال الخام')
         
         self.tree.column('Block', width=80, anchor='center')
         self.tree.column('Game ID', width=100, anchor='center')
         self.tree.column('Price', width=120, anchor='center')
-        self.tree.column('Full Entry', width=400, anchor='w')
+        self.tree.column('Full Entry', width=400, anchor='e')
         
         # Pack treeview and scrollbars
         self.tree.grid(row=0, column=0, sticky='nsew')
@@ -170,11 +170,11 @@ class CardHistoryDialog:
         # Status label
         self.status_label = tk.Label(
             content_frame,
-            text="Reading history from card...",
+            text="جاري قراءة السجل من البطاقة...",
             font=('Segoe UI', 9),
             fg=TEXT_SECONDARY,
             bg=CARD_BG,
-            anchor='w'
+            anchor='e'
         )
         self.status_label.pack(padx=15, pady=(0, 10), fill='x')
         
@@ -182,25 +182,10 @@ class CardHistoryDialog:
         button_frame = tk.Frame(self.dialog, bg=LIGHT_BG)
         button_frame.pack(fill='x', padx=15, pady=(5, 15))
         
-        # Refresh button
-        refresh_btn = tk.Button(
-            button_frame,
-            text="🔄 Refresh History",
-            font=('Segoe UI', 10, 'bold'),
-            bg=PRIMARY_COLOR,
-            fg='white',
-            relief='flat',
-            cursor='hand2',
-            padx=15,
-            pady=8,
-            command=self._load_history
-        )
-        refresh_btn.pack(side='left', padx=(0, 5))
-        
         # Close button
         close_btn = tk.Button(
             button_frame,
-            text="✖ Close",
+            text="✖ إغلاق",
             font=('Segoe UI', 10, 'bold'),
             bg=DANGER_COLOR,
             fg='white',
@@ -210,7 +195,22 @@ class CardHistoryDialog:
             pady=8,
             command=self.dialog.destroy
         )
-        close_btn.pack(side='right')
+        close_btn.pack(side='left')
+        
+        # Refresh button
+        refresh_btn = tk.Button(
+            button_frame,
+            text="🔄 تحديث السجل",
+            font=('Segoe UI', 10, 'bold'),
+            bg=PRIMARY_COLOR,
+            fg='white',
+            relief='flat',
+            cursor='hand2',
+            padx=15,
+            pady=8,
+            command=self._load_history
+        )
+        refresh_btn.pack(side='left', padx=(5, 0))
     
     def _display_preloaded_history(self):
         """Display preloaded history data without reading from Arduino."""
@@ -218,9 +218,9 @@ class CardHistoryDialog:
         for item in self.tree.get_children():
             self.tree.delete(item)
         
-        self.uid_label.config(text=f"Card UID: {self.preloaded_uid}")
+        self.uid_label.config(text=f"رقم البطاقة: {self.preloaded_uid}")
         self.status_label.config(
-            text="📖 Displaying history from recent card read...",
+            text="📖 عرض السجل من قراءة البطاقة الأخيرة...",
             fg=TEXT_SECONDARY
         )
         self.dialog.update_idletasks()
@@ -228,7 +228,7 @@ class CardHistoryDialog:
         try:
             if not self.preloaded_history:
                 self.status_label.config(
-                    text="ℹ️ No history found on this card (all blocks empty)",
+                    text="ℹ️ لم يتم العثور على سجل في هذه البطاقة (جميع الكتل فارغة)",
                     fg=TEXT_SECONDARY
                 )
                 return
@@ -258,7 +258,7 @@ class CardHistoryDialog:
                             price = parts[1].strip()
                             # Insert into tree
                             self.tree.insert('', 'end', values=(
-                                f"Block {block_num}",
+                                f"كتلة {block_num}",
                                 game_id,
                                 price,
                                 entry
@@ -267,21 +267,21 @@ class CardHistoryDialog:
                         except ValueError:
                             # Invalid price format, show raw entry
                             self.tree.insert('', 'end', values=(
-                                f"Block {block_num}",
+                                f"كتلة {block_num}",
                                 game_id,
-                                'Invalid',
+                                'غير صالح',
                                 entry
                             ))
                             total_entries += 1
             
             if total_entries == 0:
                 self.status_label.config(
-                    text="ℹ️ No valid game history entries found",
+                    text="ℹ️ لم يتم العثور على إدخالات سجل ألعاب صالحة",
                     fg=TEXT_SECONDARY
                 )
             else:
                 self.status_label.config(
-                    text=f"✓ Loaded {total_entries} game history entries from card",
+                    text=f"✓ تم تحميل {total_entries} إدخال سجل لعبة من البطاقة",
                     fg=SUCCESS_COLOR
                 )
             
@@ -290,7 +290,7 @@ class CardHistoryDialog:
         except Exception as e:
             logger.error(f"Error displaying preloaded history: {e}")
             self.status_label.config(
-                text=f"❌ Error: {str(e)}",
+                text=f"❌ خطأ: {str(e)}",
                 fg=DANGER_COLOR
             )
     
@@ -301,7 +301,7 @@ class CardHistoryDialog:
             self.tree.delete(item)
         
         self.status_label.config(
-            text="⏳ Reading history from card... Please keep card on reader...",
+            text="⏳ جاري قراءة السجل من البطاقة... يرجى إبقاء البطاقة على القارئ...",
             fg=TEXT_SECONDARY
         )
         self.dialog.update_idletasks()
@@ -309,13 +309,13 @@ class CardHistoryDialog:
         # Check if Arduino is connected
         if not self.serial_service.is_connected:
             self.status_label.config(
-                text="❌ Arduino not connected! Please connect Arduino first.",
+                text="❌ الأردوينو غير متصل! يرجى توصيل الأردوينو أولاً.",
                 fg=DANGER_COLOR
             )
-            self.uid_label.config(text="Card UID: Not connected")
+            self.uid_label.config(text="رقم البطاقة: غير متصل")
             messagebox.showerror(
-                "Connection Error",
-                "Arduino is not connected.\n\nPlease connect to Arduino before reading card history.",
+                "خطأ في الاتصال",
+                "الأردوينو غير متصل.\n\nيرجى الاتصال بالأردوينو قبل قراءة سجل البطاقة.",
                 parent=self.dialog
             )
             return
@@ -325,11 +325,11 @@ class CardHistoryDialog:
             success, uid_or_error, history_entries = self.serial_service.read_history()
             
             if success:
-                self.uid_label.config(text=f"Card UID: {uid_or_error}")
+                self.uid_label.config(text=f"رقم البطاقة: {uid_or_error}")
                 
                 if not history_entries:
                     self.status_label.config(
-                        text="ℹ️ No history found on this card (all blocks empty)",
+                        text="ℹ️ لم يتم العثور على سجل في هذه البطاقة (جميع الكتل فارغة)",
                         fg=TEXT_SECONDARY
                     )
                     return
@@ -359,7 +359,7 @@ class CardHistoryDialog:
                                 price = parts[1].strip()
                                 # Insert into tree
                                 self.tree.insert('', 'end', values=(
-                                    f"Block {block_num}",
+                                    f"كتلة {block_num}",
                                     game_id,
                                     price,
                                     entry
@@ -368,21 +368,21 @@ class CardHistoryDialog:
                             except ValueError:
                                 # Invalid price format, show raw entry
                                 self.tree.insert('', 'end', values=(
-                                    f"Block {block_num}",
+                                    f"كتلة {block_num}",
                                     game_id,
-                                    'Invalid',
+                                    'غير صالح',
                                     entry
                                 ))
                                 total_entries += 1
                 
                 if total_entries == 0:
                     self.status_label.config(
-                        text="ℹ️ No valid game history entries found",
+                        text="ℹ️ لم يتم العثور على إدخالات سجل ألعاب صالحة",
                         fg=TEXT_SECONDARY
                     )
                 else:
                     self.status_label.config(
-                        text=f"✓ Successfully loaded {total_entries} game history entries",
+                        text=f"✓ تم تحميل {total_entries} إدخال سجل لعبة بنجاح",
                         fg=SUCCESS_COLOR
                     )
                 
@@ -390,14 +390,14 @@ class CardHistoryDialog:
                 
             else:
                 # Error reading history
-                self.uid_label.config(text="Card UID: Error reading card")
+                self.uid_label.config(text="رقم البطاقة: خطأ في قراءة البطاقة")
                 self.status_label.config(
-                    text=f"❌ Error: {uid_or_error}",
+                    text=f"❌ خطأ: {uid_or_error}",
                     fg=DANGER_COLOR
                 )
                 messagebox.showerror(
-                    "Read Error",
-                    f"Failed to read card history:\n\n{uid_or_error}\n\nPlease ensure the card is on the reader.",
+                    "خطأ في القراءة",
+                    f"فشل في قراءة سجل البطاقة:\n\n{uid_or_error}\n\nيرجى التأكد من أن البطاقة على القارئ.",
                     parent=self.dialog
                 )
                 logger.error(f"Card history read failed: {uid_or_error}")
@@ -405,11 +405,11 @@ class CardHistoryDialog:
         except Exception as e:
             logger.error(f"Error loading card history: {e}")
             self.status_label.config(
-                text=f"❌ Error: {str(e)}",
+                text=f"❌ خطأ: {str(e)}",
                 fg=DANGER_COLOR
             )
             messagebox.showerror(
-                "Error",
-                f"An error occurred while reading card history:\n\n{str(e)}",
+                "خطأ",
+                f"حدث خطأ أثناء قراءة سجل البطاقة:\n\n{str(e)}",
                 parent=self.dialog
             )

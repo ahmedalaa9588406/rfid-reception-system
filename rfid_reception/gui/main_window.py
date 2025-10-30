@@ -36,7 +36,7 @@ class ModernMainWindow:
         self.config = config
         
         # Initialize receipt printer
-        company_name = config.get('company_name', 'RFID Reception System')
+        company_name = config.get('company_name', 'نظام استقبال RFID')
         company_info = {
             'address': config.get('company_address', ''),
             'phone': config.get('company_phone', '')
@@ -44,7 +44,7 @@ class ModernMainWindow:
         self.receipt_printer = ReceiptPrinter(company_name, company_info)
         self.auto_print_receipts = config.get('auto_print_receipts', True)
 
-        self.root.title("RFID Reception System")
+        self.root.title("نظام استقبال RFID")
         self.root.geometry("1100x750")
         self.root.minsize(900, 600)
         self.root.configure(bg=LIGHT_BG)
@@ -128,36 +128,36 @@ class ModernMainWindow:
 
         # Title with icon
         title_label = tk.Label(header_content,
-                              text="🎫 RFID Reception System",
+                              text="🎫 نظام استقبال RFID",
                               font=('Segoe UI', 22, 'bold'),
                               fg='white',
                               bg=PRIMARY_COLOR)
-        title_label.pack(side='left', anchor='w')
+        title_label.pack(side='right', anchor='e')
 
         # Status indicator
         self.status_indicator = tk.Label(header_content,
-                                        text="● Disconnected",
+                                        text="● غير متصل",
                                         font=('Segoe UI', 11, 'bold'),
                                         fg=DANGER_COLOR,
                                         bg=PRIMARY_COLOR)
-        self.status_indicator.pack(side='right', anchor='e')
+        self.status_indicator.pack(side='left', anchor='w')
 
     def _create_card_panel(self, parent):
         """Create card reading and top-up panel."""
         # Title
         title = tk.Label(parent,
-                        text="💳 Card Operations",
+                        text="💳 عمليات البطاقة",
                         font=('Segoe UI', 14, 'bold'),
                         fg=PRIMARY_COLOR,
                         bg=CARD_BG)
-        title.pack(padx=15, pady=(15, 10), anchor='w')
+        title.pack(padx=15, pady=(15, 10), anchor='e')
 
         # Separator
         separator = ttk.Separator(parent, orient='horizontal')
         separator.pack(fill='x', padx=15, pady=(0, 15))
 
         # Card UID section
-        self._create_info_section(parent, "📋 Card UID", "self.card_uid_var", "No card detected")
+        self._create_info_section(parent, "📋 رقم البطاقة", "self.card_uid_var", "لم يتم اكتشاف بطاقة")
 
         # Balance section
         self._create_balance_section(parent)
@@ -168,7 +168,7 @@ class ModernMainWindow:
         
         # Read Card button
         read_btn = tk.Button(btn_frame,
-                            text="🔍 Read Card",
+                            text="🔍 قراءة البطاقة",
                             font=('Segoe UI', 12, 'bold'),
                             bg=PRIMARY_COLOR,
                             fg='white',
@@ -177,11 +177,11 @@ class ModernMainWindow:
                             padx=20,
                             pady=12,
                             command=self._read_card)
-        read_btn.pack(side='left', fill='x', expand=True, padx=(0, 5))
+        read_btn.pack(side='right', fill='x', expand=True, padx=(5, 0))
         
         # Auto-Scan Toggle button
         self.auto_scan_btn = tk.Button(btn_frame,
-                                      text="⚡ Enable Auto-Scan",
+                                      text="⚡ تفعيل المسح التلقائي",
                                       font=('Segoe UI', 10, 'bold'),
                                       bg=SUCCESS_COLOR,
                                       fg='white',
@@ -190,7 +190,7 @@ class ModernMainWindow:
                                       padx=15,
                                       pady=12,
                                       command=self._toggle_auto_scan)
-        self.auto_scan_btn.pack(side='left', fill='x', expand=True, padx=(5, 0))
+        self.auto_scan_btn.pack(side='right', fill='x', expand=True, padx=(0, 5))
 
         # Spacer
         spacer = ttk.Frame(parent, height=20)
@@ -202,23 +202,30 @@ class ModernMainWindow:
 
         # Top-Up amount section
         topup_label = tk.Label(parent,
-                              text="💰 Top-Up Amount / Write Data",
+                              text="💰 مبلغ الشحن / كتابة البيانات",
                               font=('Segoe UI', 12, 'bold'),
                               fg=PRIMARY_COLOR,
                               bg=CARD_BG)
-        topup_label.pack(padx=15, pady=(10, 5), anchor='w')
+        topup_label.pack(padx=15, pady=(10, 5), anchor='e')
         
         # Instruction label
         instruction_label = tk.Label(parent,
-                                    text="Enter: 50 (number) | K50 (K-amount) | Ahmed (text) - Max 11 chars",
+                                    text="أدخل: 50 (رقم) | K50 (مبلغ K) | أحمد (نص) - بحد أقصى 11 حرف",
                                     font=('Segoe UI', 8),
                                     fg=TEXT_SECONDARY,
                                     bg=CARD_BG)
-        instruction_label.pack(padx=15, pady=(0, 5), anchor='w')
+        instruction_label.pack(padx=15, pady=(0, 5), anchor='e')
 
         # Amount input with EGP label
         amount_frame = tk.Frame(parent, bg=CARD_BG)
         amount_frame.pack(padx=15, pady=5, fill='x')
+
+        egp_label = tk.Label(amount_frame,
+                            text="جنيه ",
+                            font=('Segoe UI', 12, 'bold'),
+                            fg=TEXT_SECONDARY,
+                            bg=CARD_BG)
+        egp_label.pack(side='right', padx=10)
 
         self.amount_var = tk.StringVar()
         amount_entry = tk.Entry(amount_frame,
@@ -226,27 +233,14 @@ class ModernMainWindow:
                                font=('Segoe UI', 14, 'bold'),
                                relief='flat',
                                bd=1,
-                               width=15)
+                               width=15,
+                               justify='right')
         amount_entry.configure(highlightbackground=BORDER_COLOR, highlightthickness=1)
-        amount_entry.pack(side='left', fill='x', expand=True, ipady=8)
-
-        egp_label = tk.Label(amount_frame,
-                            text=" EGP",
-                            font=('Segoe UI', 12, 'bold'),
-                            fg=TEXT_SECONDARY,
-                            bg=CARD_BG)
-        egp_label.pack(side='left', padx=10)
+        amount_entry.pack(side='right', fill='x', expand=True, ipady=8)
 
         # Offer % input (new) -------------------------------------------------
         offer_frame = tk.Frame(parent, bg=CARD_BG)
         offer_frame.pack(padx=15, pady=(6, 10), fill='x')
-
-        offer_label = tk.Label(offer_frame,
-                               text="🎁 Offer % (optional)",
-                               font=('Segoe UI', 10),
-                               fg=TEXT_SECONDARY,
-                               bg=CARD_BG)
-        offer_label.pack(side='left', padx=(0, 10))
 
         self.offer_var = tk.StringVar(value="0")
         offer_entry = tk.Entry(offer_frame,
@@ -254,31 +248,26 @@ class ModernMainWindow:
                                font=('Segoe UI', 12),
                                width=6,
                                relief='flat',
-                               bd=1)
+                               bd=1,
+                               justify='right')
         offer_entry.configure(highlightbackground=BORDER_COLOR, highlightthickness=1)
-        offer_entry.pack(side='left', ipady=4)
+        offer_entry.pack(side='right', ipady=4)
+
+        offer_label = tk.Label(offer_frame,
+                               text="🎁 نسبة العرض % (اختياري)",
+                               font=('Segoe UI', 10),
+                               fg=TEXT_SECONDARY,
+                               bg=CARD_BG)
+        offer_label.pack(side='right', padx=(0, 10))
         # --------------------------------------------------------------------
 
         # Buttons frame
         buttons_frame = tk.Frame(parent, bg=CARD_BG)
         buttons_frame.pack(padx=15, pady=10, fill='x')
         
-        # Top-Up button
-        topup_btn = tk.Button(buttons_frame,
-                             text="✓ Add to Balance",
-                             font=('Segoe UI', 11, 'bold'),
-                             bg=SUCCESS_COLOR,
-                             fg='white',
-                             relief='flat',
-                             cursor='hand2',
-                             padx=15,
-                             pady=10,
-                             command=self._top_up)
-        topup_btn.pack(side='left', fill='x', expand=True, padx=(0, 5))
-        
         # Write Balance button (sets exact amount)
         write_btn = tk.Button(buttons_frame,
-                             text="✍ Set Balance",
+                             text="✍ تعيين الرصيد",
                              font=('Segoe UI', 11, 'bold'),
                              bg=SECONDARY_COLOR,
                              fg='white',
@@ -287,53 +276,20 @@ class ModernMainWindow:
                              padx=15,
                              pady=10,
                              command=self._write_balance)
-        write_btn.pack(side='right', fill='x', expand=True, padx=(5, 0))
+        write_btn.pack(side='left', fill='x', expand=True, padx=(5, 0))
 
-        # Manual mode section
-        sep3 = ttk.Separator(parent, orient='horizontal')
-        sep3.pack(fill='x', padx=15, pady=10)
-
-        manual_label = tk.Label(parent,
-                               text="⚙ Manual Mode",
-                               font=('Segoe UI', 11, 'bold'),
-                               fg=WARNING_COLOR,
-                               bg=CARD_BG)
-        manual_label.pack(padx=15, pady=(10, 5), anchor='w')
-
-        self.manual_mode_var = tk.BooleanVar()
-        manual_check = tk.Checkbutton(parent,
-                                     text="Enable Manual Card Entry",
-                                     variable=self.manual_mode_var,
-                                     font=('Segoe UI', 10),
-                                     bg=CARD_BG,
-                                     fg=TEXT_PRIMARY,
-                                     command=self._toggle_manual_mode)
-        manual_check.pack(padx=15, pady=5, anchor='w')
-
-        # Manual UID entry
-        self.manual_uid_var = tk.StringVar()
-        manual_uid_entry = tk.Entry(parent,
-                                   textvariable=self.manual_uid_var,
-                                   font=('Segoe UI', 10),
-                                   relief='flat',
-                                   bd=1,
-                                   state='disabled')
-        manual_uid_entry.configure(highlightbackground=BORDER_COLOR, highlightthickness=1)
-        manual_uid_entry.pack(padx=15, pady=5, fill='x', ipady=6)
-        self.manual_uid_entry = manual_uid_entry
-
-        self.manual_load_btn = tk.Button(parent,
-                                        text="Load Card UID",
-                                        font=('Segoe UI', 10, 'bold'),
-                                        bg=WARNING_COLOR,
-                                        fg='white',
-                                        relief='flat',
-                                        cursor='hand2',
-                                        state='disabled',
-                                        padx=10,
-                                        pady=8,
-                                        command=self._load_manual_card)
-        self.manual_load_btn.pack(padx=15, pady=10, fill='x')
+        # Top-Up button
+        topup_btn = tk.Button(buttons_frame,
+                             text="✓ إضافة إلى الرصيد",
+                             font=('Segoe UI', 11, 'bold'),
+                             bg=SUCCESS_COLOR,
+                             fg='white',
+                             relief='flat',
+                             cursor='hand2',
+                             padx=15,
+                             pady=10,
+                             command=self._top_up)
+        topup_btn.pack(side='right', fill='x', expand=True, padx=(0, 5))
 
     def _create_balance_section(self, parent):
         """Create balance display section."""
@@ -341,19 +297,19 @@ class ModernMainWindow:
         balance_frame.pack(padx=15, pady=10, fill='x', ipady=12)
 
         balance_label = tk.Label(balance_frame,
-                                text="💵 Current Balance",
+                                text="💵 الرصيد الحالي",
                                 font=('Segoe UI', 10),
                                 fg='white',
                                 bg=SUCCESS_COLOR)
-        balance_label.pack(anchor='w', padx=12, pady=(0, 5))
+        balance_label.pack(anchor='e', padx=12, pady=(0, 5))
 
-        self.balance_var = tk.StringVar(value="0.00 EGP")
+        self.balance_var = tk.StringVar(value="0.00 جنيه")
         balance_value = tk.Label(balance_frame,
                                 textvariable=self.balance_var,
                                 font=('Segoe UI', 20, 'bold'),
                                 fg='white',
                                 bg=SUCCESS_COLOR)
-        balance_value.pack(anchor='w', padx=12)
+        balance_value.pack(anchor='e', padx=12)
 
     def _create_info_section(self, parent, title, var_name, default_value):
         """Create an information display section."""
@@ -365,7 +321,7 @@ class ModernMainWindow:
                         font=('Segoe UI', 10),
                         fg=TEXT_SECONDARY,
                         bg=CARD_BG)
-        label.pack(anchor='w')
+        label.pack(anchor='e')
 
         var = tk.StringVar(value=default_value)
         setattr(self, var_name.split('.')[-1], var)
@@ -376,8 +332,8 @@ class ModernMainWindow:
                         fg=TEXT_PRIMARY,
                         bg=CARD_BG,
                         wraplength=300,
-                        justify='left')
-        value.pack(anchor='w', pady=(3, 0))
+                        justify='right')
+        value.pack(anchor='e', pady=(3, 0))
 
         return var
 
@@ -385,11 +341,11 @@ class ModernMainWindow:
         """Create quick actions panel."""
         # Title
         title = tk.Label(parent,
-                        text="🎯 Quick Actions",
+                        text="🎯 الإجراءات السريعة",
                         font=('Segoe UI', 14, 'bold'),
                         fg=PRIMARY_COLOR,
                         bg=CARD_BG)
-        title.pack(padx=15, pady=(15, 10), anchor='w')
+        title.pack(padx=15, pady=(15, 10), anchor='e')
 
         # Separator
         separator = ttk.Separator(parent, orient='horizontal')
@@ -397,14 +353,14 @@ class ModernMainWindow:
 
         # Actions list
         actions = [
-            ("🎫 View All Cards", self._show_all_cards, SUCCESS_COLOR),
-            ("📜 Cards History", self._show_card_history, SECONDARY_COLOR),
-            ("🖨️ Print Last Receipt", self._print_last_receipt, WARNING_COLOR),
-            ("📄 Print Card Summary", self._print_card_summary, WARNING_COLOR),
-            ("📅 Daily Report", self._generate_daily_report_manual, PRIMARY_COLOR),
-            ("🗓 Weekly Report", self._generate_weekly_report_manual, PRIMARY_COLOR),
-            ("📆 Monthly Report", self._generate_monthly_report_manual, PRIMARY_COLOR),
-            ("📈 Yearly Report", self._generate_yearly_report_manual, SECONDARY_COLOR),
+            ("🎫 عرض جميع البطاقات", self._show_all_cards, SUCCESS_COLOR),
+            ("📜 سجل البطاقات", self._show_card_history, SECONDARY_COLOR),
+            ("🖨️ طباعة آخر إيصال", self._print_last_receipt, WARNING_COLOR),
+            ("📄 طباعة ملخص البطاقة", self._print_card_summary, WARNING_COLOR),
+            ("📅 تقرير يومي", self._generate_daily_report_manual, PRIMARY_COLOR),
+            ("🗓 تقرير أسبوعي", self._generate_weekly_report_manual, PRIMARY_COLOR),
+            ("📆 تقرير شهري", self._generate_monthly_report_manual, PRIMARY_COLOR),
+            ("📈 تقرير سنوي", self._generate_yearly_report_manual, SECONDARY_COLOR),
         ]
 
         for i, (text, command, color) in enumerate(actions):
@@ -426,41 +382,41 @@ class ModernMainWindow:
         footer_frame.pack(fill='x', side='bottom')
         footer_frame.pack_propagate(False)
 
-        self.status_var = tk.StringVar(value="Ready")
+        self.status_var = tk.StringVar(value="جاهز")
         status_label = tk.Label(footer_frame,
                                textvariable=self.status_var,
                                font=('Segoe UI', 10),
                                fg='white',
                                bg=TEXT_PRIMARY,
-                               anchor='w')
+                               anchor='e')
         status_label.pack(fill='both', expand=True, padx=20, pady=12)
 
     def _check_serial_connection(self):
         """Check if serial connection is established."""
         if self.serial_service.is_connected:
-            self.status_indicator.config(text=f"● Connected ({self.serial_service.port})", fg=SUCCESS_COLOR)
-            self.status_var.set(f"Connected to {self.serial_service.port}")
+            self.status_indicator.config(text=f"● متصل ({self.serial_service.port})", fg=SUCCESS_COLOR)
+            self.status_var.set(f"متصل بـ {self.serial_service.port}")
         else:
-            self.status_indicator.config(text="● Disconnected", fg=DANGER_COLOR)
-            self.status_var.set("Not connected to Arduino - Check settings")
+            self.status_indicator.config(text="● غير متصل", fg=DANGER_COLOR)
+            self.status_var.set("غير متصل بالأردوينو - تحقق من الإعدادات")
 
     def _read_card(self):
         """Read RFID card from Arduino with automatic database sync from card value."""
         # Immediate feedback - button clicked
-        self.status_var.set("⏳ Reading card... Please wait...")
+        self.status_var.set("⏳ جاري قراءة البطاقة... يرجى الانتظار...")
         self.root.update()
         self.root.update_idletasks()
         
         # Check Arduino connection
         if not self.serial_service.is_connected:
-            self.status_var.set("⚠️ Arduino not connected! Please use Manual Mode to test.")
+            self.status_var.set("⚠️ الأردوينو غير متصل! يرجى استخدام الوضع اليدوي للاختبار.")
             self.root.update_idletasks()
             logger.warning("Read card attempted but Arduino not connected")
             return
 
         try:
             # Show loading indicator
-            self.status_var.set("⏳ Loading card from Arduino... Please wait...")
+            self.status_var.set("⏳ جاري تحميل البطاقة من الأردوينو... يرجى الانتظار...")
             self.root.update()
             
             # Read card from Arduino
@@ -543,7 +499,7 @@ class ModernMainWindow:
                     self.current_card_uid = card_uid
                     self.card_uid_var.set(card_uid)
                     self.current_balance = balance
-                    self.balance_var.set(f"{balance:.2f} EGP")
+                    self.balance_var.set(f"{balance:.2f} جنيه")
                     
                     # Force UI update
                     self.root.update_idletasks()
@@ -553,11 +509,11 @@ class ModernMainWindow:
                     
                     # Update status bar with result
                     if card_amount is not None and card_amount != db_balance:
-                        self.status_var.set(f"🔄 Card synced: {card_uid} | Balance: {balance:.2f} EGP (was {db_balance:.2f} in DB)")
+                        self.status_var.set(f"🔄 تمت مزامنة البطاقة: {card_uid} | الرصيد: {balance:.2f} جنيه (كان {db_balance:.2f} في قاعدة البيانات)")
                     elif is_new_card:
-                        self.status_var.set(f"✨ New card loaded: {card_uid} | Balance: {balance:.2f} EGP")
+                        self.status_var.set(f"✨ تم تحميل بطاقة جديدة: {card_uid} | الرصيد: {balance:.2f} جنيه")
                     else:
-                        self.status_var.set(f"✓ Card loaded: {card_uid} | Balance: {balance:.2f} EGP")
+                        self.status_var.set(f"✓ تم تحميل البطاقة: {card_uid} | الرصيد: {balance:.2f} جنيه")
                     
                     logger.info(f"Card read and synced: {card_uid}, Balance: {balance:.2f} EGP, New: {is_new_card}")
                     
@@ -570,13 +526,13 @@ class ModernMainWindow:
                     self.root.update_idletasks()
             else:
                 # Only show error in status bar, not popup
-                self.status_var.set(f"❌ Card read failed: {str(result)}")
+                self.status_var.set(f"❌ فشلت قراءة البطاقة: {str(result)}")
                 self.root.update_idletasks()
                 logger.warning(f"Card read failed: {result}")
                 
         except Exception as e:
             logger.error(f"Error in read card function: {e}")
-            self.status_var.set(f"❌ Error: {str(e)}")
+            self.status_var.set(f"❌ خطأ: {str(e)}")
             self.root.update_idletasks()
 
     def _toggle_manual_mode(self):
@@ -587,7 +543,7 @@ class ModernMainWindow:
         self.manual_load_btn.config(state=state)
 
         if self.manual_mode:
-            self.status_var.set("Manual Mode: Enter UID manually")
+            self.status_var.set("الوضع اليدوي: أدخل الرقم يدوياً")
         else:
             self._check_serial_connection()
 
@@ -595,11 +551,11 @@ class ModernMainWindow:
         """Load card manually with automatic database save."""
         raw_uid = self.manual_uid_var.get().strip()
         if not raw_uid:
-            self.status_var.set("⚠️ Please enter a card UID")
+            self.status_var.set("⚠️ يرجى إدخال رقم البطاقة")
             return
 
         # Show loading
-        self.status_var.set("⏳ Loading card manually... Please wait...")
+        self.status_var.set("⏳ جاري تحميل البطاقة يدوياً... يرجى الانتظار...")
         self.root.update_idletasks()
 
         try:
@@ -617,22 +573,22 @@ class ModernMainWindow:
             self.card_uid_var.set(uid)
             balance = card['balance']
             self.current_balance = balance
-            self.balance_var.set(f"{balance:.2f} EGP")
+            self.balance_var.set(f"{balance:.2f} جنيه")
             
             # Log the event
             self._log_card_read(uid, is_new=is_new_card)
             
             # Update status bar (no popup)
             if is_new_card:
-                self.status_var.set(f"✨ New card created (Manual): {uid} | Balance: {balance:.2f} EGP")
+                self.status_var.set(f"✨ تم إنشاء بطاقة جديدة (يدوي): {uid} | الرصيد: {balance:.2f} جنيه")
             else:
-                self.status_var.set(f"✓ Card loaded (Manual): {uid} | Balance: {balance:.2f} EGP")
+                self.status_var.set(f"✓ تم تحميل البطاقة (يدوي): {uid} | الرصيد: {balance:.2f} جنيه")
             
             logger.info(f"Manual card loaded: {uid}, Balance: {balance:.2f} EGP, New: {is_new_card}")
             
         except Exception as e:
             logger.error(f"Manual load error: {e}")
-            self.status_var.set(f"❌ Failed to load card: {str(e)}")
+            self.status_var.set(f"❌ فشل تحميل البطاقة: {str(e)}")
 
     def _parse_input(self, input_value):
         """Parse input to detect type: numeric, K-prefixed, or string.
@@ -668,17 +624,17 @@ class ModernMainWindow:
     def _top_up(self):
         """Perform top-up operation or write string data."""
         if not self.current_card_uid:
-            messagebox.showwarning("No Card", "Read or load a card first.")
+            messagebox.showwarning("لا توجد بطاقة", "اقرأ أو حمّل بطاقة أولاً.")
             return
 
         input_value = self.amount_var.get().strip()
         if not input_value:
-            messagebox.showerror("Empty Input", "Please enter a value.")
+            messagebox.showerror("إدخال فارغ", "يرجى إدخال قيمة.")
             return
         
         # Check if input is too long for card storage
         if len(input_value) > 11:
-            messagebox.showerror("Input Too Long", "Maximum 11 characters allowed for card storage.")
+            messagebox.showerror("إدخال طويل جداً", "الحد الأقصى 11 حرف لتخزين البطاقة.")
             return
 
         # Parse input
@@ -686,7 +642,7 @@ class ModernMainWindow:
         
         if input_type == 'numeric':
             # Regular numeric input - no confirmation
-            self.status_var.set("Processing top-up...")
+            self.status_var.set("جاري معالجة الشحن...")
             self.root.update_idletasks()
             if self.manual_mode:
                 self._manual_top_up(amount, display_value)
@@ -695,7 +651,7 @@ class ModernMainWindow:
                     
         elif input_type == 'k_amount':
             # K-prefixed amount (e.g., K50) - no confirmation
-            self.status_var.set("Processing K-amount top-up...")
+            self.status_var.set("جاري معالجة شحن K-amount...")
             self.root.update_idletasks()
             if self.manual_mode:
                 self._manual_top_up(amount, display_value)
@@ -704,11 +660,11 @@ class ModernMainWindow:
                     
         else:
             # String input - only write to card (keep confirmation for strings)
-            if messagebox.askyesno("Confirm", f"Write '{display_value}' to card {self.current_card_uid}?\n\nNote: Balance will NOT be updated in database."):
-                self.status_var.set("Writing string to card...")
+            if messagebox.askyesno("تأكيد", f"كتابة '{display_value}' على البطاقة {self.current_card_uid}؟\n\nملاحظة: لن يتم تحديث الرصيد في قاعدة البيانات."):
+                self.status_var.set("جاري كتابة النص على البطاقة...")
                 self.root.update_idletasks()
                 if self.manual_mode:
-                    messagebox.showinfo("Manual Mode", "String data can only be written in Arduino mode.\nManual mode only supports numeric balance updates.")
+                    messagebox.showinfo("الوضع اليدوي", "يمكن كتابة البيانات النصية فقط في وضع الأردوينو.\nالوضع اليدوي يدعم فقط تحديثات الرصيد الرقمي.")
                 else:
                     self._arduino_write_string(display_value)
 
@@ -912,21 +868,21 @@ class ModernMainWindow:
     def _update_balance(self, new_balance):
         """Update balance display."""
         self.current_balance = new_balance
-        self.balance_var.set(f"{new_balance:.2f} EGP")
+        self.balance_var.set(f"{new_balance:.2f} جنيه")
         self.amount_var.set("")
-        self.status_var.set("Top-up successful")
+        self.status_var.set("تمت عملية الشحن بنجاح")
     
     def _print_last_receipt(self):
         """Print receipt for last transaction."""
         if not self.current_card_uid:
-            messagebox.showwarning("No Card", "No card loaded. Please read a card first.")
+            messagebox.showwarning("لا توجد بطاقة", "لا توجد بطاقة محملة. يرجى قراءة بطاقة أولاً.")
             return
         
         try:
             # Get last transaction for this card
             transactions = self.db_service.get_transactions(card_uid=self.current_card_uid)
             if not transactions:
-                messagebox.showinfo("No Transactions", "No transactions found for this card.")
+                messagebox.showinfo("لا توجد معاملات", "لا توجد معاملات لهذا البطاقة.")
                 return
             
             last_txn = transactions[0]  # Most recent
@@ -946,19 +902,19 @@ class ModernMainWindow:
                 # Auto-open the PDF
                 try:
                     os.startfile(result)
-                    self.status_var.set(f"Receipt opened: {os.path.basename(result)}")
+                    self.status_var.set(f"تم فتح الإيصال: {os.path.basename(result)}")
                 except Exception as e:
-                    self.status_var.set(f"Receipt saved: {os.path.basename(result)}")
+                    self.status_var.set(f"تم حفظ الإيصال: {os.path.basename(result)}")
             else:
-                messagebox.showerror("Print Failed", result)
+                messagebox.showerror("فشل الطباعة", result)
         except Exception as e:
             logger.error(f"Print last receipt error: {e}")
-            messagebox.showerror("Error", str(e))
+            messagebox.showerror("خطأ", str(e))
     
     def _print_card_summary(self):
         """Print complete card summary with transaction history."""
         if not self.current_card_uid:
-            messagebox.showwarning("No Card", "No card loaded. Please read a card first.")
+            messagebox.showwarning("لا توجد بطاقة", "لا توجد بطاقة محملة. يرجى قراءة بطاقة أولاً.")
             return
         
         try:
@@ -975,14 +931,14 @@ class ModernMainWindow:
                 # Auto-open the PDF
                 try:
                     os.startfile(result)
-                    self.status_var.set(f"Summary opened: {os.path.basename(result)}")
+                    self.status_var.set(f"تم فتح الملخص: {os.path.basename(result)}")
                 except Exception as e:
-                    self.status_var.set(f"Summary saved: {os.path.basename(result)}")
+                    self.status_var.set(f"تم حفظ الملخص: {os.path.basename(result)}")
             else:
-                messagebox.showerror("Print Failed", result)
+                messagebox.showerror("فشل الطباعة", result)
         except Exception as e:
             logger.error(f"Print card summary error: {e}")
-            messagebox.showerror("Error", str(e))
+            messagebox.showerror("خطأ", str(e))
 
     # ------------------------------------------------------------------ #
     # Dialog Openers
@@ -1005,7 +961,7 @@ class ModernMainWindow:
     def _on_settings_saved(self):
         """Callback when settings are saved."""
         self._check_serial_connection()
-        messagebox.showinfo("Settings", "Settings saved!")
+        messagebox.showinfo("الإعدادات", "تم حفظ الإعدادات!")
 
     def _show_all_cards(self):
         """Show all cards dialog."""
@@ -1031,7 +987,7 @@ class ModernMainWindow:
         
         try:
             # Update status
-            self.status_var.set(f"⏳ Reading game history from card...")
+            self.status_var.set(f"⏳ قراءة سجل اللعبة من البطاقة...")
             self.root.update_idletasks()
             
             # Read history from Arduino
@@ -1050,21 +1006,21 @@ class ModernMainWindow:
                 )
                 
                 # Update status
-                self.status_var.set(f"✓ Card loaded: {card_uid} | Balance: {self.current_balance:.2f} EGP | History displayed")
+                self.status_var.set(f"✓ تم تحميل البطاقة: {card_uid} | الرصيد: {self.current_balance:.2f} جنيه | تم عرض السجل")
             else:
                 # History read failed, but don't interrupt the main flow
                 logger.warning(f"Could not read history: {uid_or_error}")
-                self.status_var.set(f"✓ Card loaded: {card_uid} | Balance: {self.current_balance:.2f} EGP (history unavailable)")
+                self.status_var.set(f"✓ تم تحميل البطاقة: {card_uid} | الرصيد: {self.current_balance:.2f} جنيه (السجل غير متوفر)")
                 
         except Exception as e:
             logger.error(f"Error reading card history: {e}")
             # Don't show error popup, just log it
-            self.status_var.set(f"✓ Card loaded: {card_uid} | Balance: {self.current_balance:.2f} EGP")
+            self.status_var.set(f"✓ تم تحميل البطاقة: {card_uid} | الرصيد: {self.current_balance:.2f} جنيه")
 
     def _generate_daily_report_manual(self):
         try:
             date_str = simpledialog.askstring(
-                "Daily Report", "Enter date (YYYY-MM-DD) or leave blank for today:", parent=self.root
+                "التقرير اليومي", "أدخل التاريخ (YYYY-MM-DD) أو اتركه فارغًا لليوم:", parent=self.root
             )
             
             # Compute date
@@ -1072,7 +1028,7 @@ class ModernMainWindow:
                 try:
                     d = datetime.strptime(date_str, '%Y-%m-%d').date()
                 except Exception:
-                    messagebox.showerror("Daily Report", "Invalid date format. Use YYYY-MM-DD.")
+                    messagebox.showerror("التقرير اليومي", "تنسيق التاريخ غير صالح. استخدم YYYY-MM-DD.")
                     return
             else:
                 d = datetime.now().date()
@@ -1092,19 +1048,19 @@ class ModernMainWindow:
             # Auto-open the PDF
             try:
                 os.startfile(path)
-                messagebox.showinfo("Daily Report", f"Report opened successfully!\n\nSaved to:\n{path}")
+                messagebox.showinfo("التقرير اليومي", f"تم فتح التقرير بنجاح!\n\nتم حفظه في:\n{path}")
             except Exception as e:
-                messagebox.showinfo("Daily Report", f"Report generated:\n{path}\n\nPlease open it manually.")
+                messagebox.showinfo("التقرير اليومي", f"تم إنشاء التقرير:\n{path}\n\nيرجى فتحه يدويًا.")
         except Exception as e:
             logger.error(f"Daily report error: {e}")
-            messagebox.showerror("Daily Report", str(e))
+            messagebox.showerror("التقرير اليومي", str(e))
 
         
     def _generate_weekly_report_manual(self):
         try:
             week_start = simpledialog.askstring(
-                "Weekly Report",
-                "Enter week start (YYYY-MM-DD, Monday). Leave blank for current week:",
+                "التقرير الأسبوعي",
+                "أدخل بداية الأسبوع (YYYY-MM-DD, الإثنين). اتركه فارغًا للأسبوع الحالي:",
                 parent=self.root
             )
             
@@ -1113,7 +1069,7 @@ class ModernMainWindow:
                 try:
                     start = datetime.strptime(week_start, '%Y-%m-%d').date()
                 except Exception:
-                    messagebox.showerror("Weekly Report", "Invalid date format. Use YYYY-MM-DD.")
+                    messagebox.showerror("التقرير الأسبوعي", "تنسيق التاريخ غير صالح. استخدم YYYY-MM-DD.")
                     return
             else:
                 today = datetime.now().date()
@@ -1135,21 +1091,21 @@ class ModernMainWindow:
             # Auto-open the PDF
             try:
                 os.startfile(path)
-                messagebox.showinfo("Weekly Report", f"Report opened successfully!\n\nSaved to:\n{path}")
+                messagebox.showinfo("التقرير الأسبوعي", f"تم فتح التقرير بنجاح!\n\nتم حفظه في:\n{path}")
             except Exception as e:
-                messagebox.showinfo("Weekly Report", f"Report generated:\n{path}\n\nPlease open it manually.")
+                messagebox.showinfo("التقرير الأسبوعي", f"تم إنشاء التقرير:\n{path}\n\nيرجى فتحه يدويًا.")
         except Exception as e:
             logger.error(f"Weekly report error: {e}")
-            messagebox.showerror("Weekly Report", str(e))
+            messagebox.showerror("التقرير الأسبوعي", str(e))
 
     def _generate_monthly_report_manual(self):
         try:
             m = simpledialog.askinteger(
-                "Monthly Report", "Enter month (1-12):", initialvalue=datetime.now().month,
+                "التقرير الشهري", "أدخل الشهر (1-12):", initialvalue=datetime.now().month,
                 minvalue=1, maxvalue=12, parent=self.root
             )
             y = simpledialog.askinteger(
-                "Monthly Report", "Enter year:", initialvalue=datetime.now().year,
+                "التقرير الشهري", "أدخل السنة:", initialvalue=datetime.now().year,
                 minvalue=2000, maxvalue=2100, parent=self.root
             )
             if not m:
@@ -1169,17 +1125,17 @@ class ModernMainWindow:
             # Auto-open the PDF
             try:
                 os.startfile(path)
-                messagebox.showinfo("Monthly Report", f"Report opened successfully!\n\nSaved to:\n{path}")
+                messagebox.showinfo("التقرير الشهري", f"تم فتح التقرير بنجاح!\n\nتم حفظه في:\n{path}")
             except Exception as e:
-                messagebox.showinfo("Monthly Report", f"Report generated:\n{path}\n\nPlease open it manually.")
+                messagebox.showinfo("التقرير الشهري", f"تم إنشاء التقرير:\n{path}\n\nيرجى فتحه يدويًا.")
         except Exception as e:
             logger.error(f"Monthly report error: {e}")
-            messagebox.showerror("Monthly Report", str(e))
+            messagebox.showerror("التقرير الشهري", str(e))
 
     def _generate_yearly_report_manual(self):
         try:
             y = simpledialog.askinteger(
-                "Yearly Report", "Enter year (blank for current):", initialvalue=datetime.now().year,
+                "التقرير السنوي", "أدخل السنة (فارغ للسنة الحالية):", initialvalue=datetime.now().year,
                 minvalue=2000, maxvalue=2100, parent=self.root
             )
             if not y:
@@ -1197,19 +1153,19 @@ class ModernMainWindow:
             # Auto-open the PDF
             try:
                 os.startfile(path)
-                messagebox.showinfo("Yearly Report", f"Report opened successfully!\n\nSaved to:\n{path}")
+                messagebox.showinfo("التقرير السنوي", f"تم فتح التقرير بنجاح!\n\nتم حفظه في:\n{path}")
             except Exception as e:
-                messagebox.showinfo("Yearly Report", f"Report generated:\n{path}\n\nPlease open it manually.")
+                messagebox.showinfo("التقرير السنوي", f"تم إنشاء التقرير:\n{path}\n\nيرجى فتحه يدويًا.")
         except Exception as e:
             logger.error(f"Yearly report error: {e}")
-            messagebox.showerror("Yearly Report", str(e))
+            messagebox.showerror("التقرير السنوي", str(e))
 
     def _export_cards_to_pdf(self):
         """Export cards to PDF."""
         try:
             cards = self.db_service.get_all_cards()
             if not cards:
-                messagebox.showwarning("No Cards", "No cards available to export.")
+                messagebox.showwarning("لا توجد بطاقات", "لا توجد بطاقات متاحة للتصدير.")
                 return
 
             file_path = filedialog.asksaveasfilename(
@@ -1221,10 +1177,10 @@ class ModernMainWindow:
                 return
 
             self.reports_generator.generate_beautiful_arabic_report(cards, output_path=file_path)
-            messagebox.showinfo("Export Successful", f"PDF exported to:\n{file_path}")
+            messagebox.showinfo("نجاح التصدير", f"تم تصدير PDF إلى:\n{file_path}")
         except Exception as e:
             logger.error(f"Export error: {e}")
-            messagebox.showerror("Export Failed", str(e))
+            messagebox.showerror("فشل التصدير", str(e))
     
     def _format_card_uid(self, raw_uid):
         """Format card UID to standard format without spaces."""
@@ -1274,35 +1230,35 @@ class ModernMainWindow:
     def _write_balance(self):
         """Write a specific balance to the card (not add, but set)."""
         if not self.current_card_uid:
-            messagebox.showwarning("No Card", "Read or load a card first.")
+            messagebox.showwarning("لا توجد بطاقة", "اقرأ أو حمّل بطاقة أولاً.")
             return
 
         input_value = self.amount_var.get().strip()
         if not input_value:
-            messagebox.showerror("Empty Input", "Please enter a value.")
+            messagebox.showerror("إدخال فارغ", "يرجى إدخال قيمة.")
             return
         
         # Check if input is too long
         if len(input_value) > 11:
-            messagebox.showerror("Input Too Long", "Maximum 11 characters allowed.")
+            messagebox.showerror("إدخال طويل جداً", "الحد الأقصى 11 حرف.")
             return
 
         # Parse input
         input_type, amount, display_value = self._parse_input(input_value)
         
         if input_type == 'string':
-            messagebox.showerror("Invalid Input", "Set Balance only accepts numeric values or K-amounts (e.g., 50 or K50).\nFor text, use 'Add to Balance' button.")
+            messagebox.showerror("إدخال غير صالح", "تعيين الرصيد يقبل فقط القيم الرقمية أو K-amounts (مثل، 50 أو K50).\nللنص، استخدم زر 'إضافة إلى الرصيد'.")
             return
         
         if amount < 0:
-            messagebox.showerror("Invalid Amount", "Amount cannot be negative.")
+            messagebox.showerror("مبلغ غير صالح", "لا يمكن أن يكون المبلغ سالبًا.")
             return
 
         current_balance = self.current_balance
         difference = amount - current_balance
         
         # No confirmation - proceed directly
-        self.status_var.set("Writing balance...")
+        self.status_var.set("جاري كتابة الرصيد...")
         self.root.update_idletasks()
 
         if self.manual_mode:
@@ -1326,9 +1282,9 @@ class ModernMainWindow:
                 if self.auto_print_receipts:
                     self._print_receipt(self.current_card_uid, difference, final_balance, tx_id)
                 
-                self.status_var.set(f"✓ Balance set to {new_balance:.2f} EGP (Manual)")
+                self.status_var.set(f"✓ تم تعيين الرصيد إلى {new_balance:.2f} جنيه (يدوي)")
             else:
-                self.status_var.set("✓ Balance unchanged (already at specified amount)")
+                self.status_var.set("✓ الرصيد لم يتغير (موجود بالفعل بالمبلغ المحدد)")
         except Exception as e:
             logger.error(f"Manual balance write error: {e}")
             messagebox.showerror("DB Error", str(e))
@@ -1355,9 +1311,9 @@ class ModernMainWindow:
                     if self.auto_print_receipts:
                         self._print_receipt(self.current_card_uid, difference, final_balance, tx_id)
                     
-                    self.status_var.set(f"✓ Balance set to {new_balance:.2f} EGP | Card: '{display_value}'")
+                    self.status_var.set(f"✓ تم تعيين الرصيد إلى {new_balance:.2f} جنيه | بطاقة: '{display_value}'")
                 else:
-                    self.status_var.set(f"✓ Card updated with '{display_value}' (no balance change)")
+                    self.status_var.set(f"✓ تم تحديث البطاقة بـ '{display_value}' (لا تغيير في الرصيد)")
             except Exception as e:
                 logger.error(f"DB error after write: {e}")
                 self.status_var.set(f"❌ Database error: {str(e)}")
@@ -1379,27 +1335,25 @@ class ModernMainWindow:
         """Start automatic card scanning."""
         if not self.serial_service.is_connected:
             messagebox.showwarning(
-                "Arduino Not Connected",
-                "Please connect to Arduino before enabling auto-scan.\n\n"
-                "Go to Settings → Configure Serial to connect."
+                "الأردوينو غير متصل",
+                "يرجى الاتصال بالأردوينو قبل تفعيل المسح التلقائي.\n\nانتقل إلى الإعدادات ← تكوين المنفذ التسلسلي للاتصال."
             )
             return
         
         if self.manual_mode:
             messagebox.showwarning(
-                "Manual Mode Active",
-                "Auto-scan is not available in Manual Mode.\n\n"
-                "Disable Manual Mode first to use auto-scan."
+                "الوضع اليدوي نشط",
+                "المسح التلقائي غير متاح في الوضع اليدوي.\n\nقم بتعطيل الوضع اليدوي أولاً لاستخدام المسح التلقائي."
             )
             return
         
         self.auto_scan_enabled = True
         self.last_scanned_uid = None
         self.auto_scan_btn.config(
-            text="⏸️ Disable Auto-Scan",
+            text="⏸️ تعطيل المسح التلقائي",
             bg=WARNING_COLOR
         )
-        self.status_var.set("🔄 Auto-scan enabled - Place card on reader...")
+        self.status_var.set("🔄 تم تفعيل المسح التلقائي - ضع البطاقة على القارئ...")
         logger.info("Auto-scan enabled")
         
         # Start the scanning loop
@@ -1413,10 +1367,10 @@ class ModernMainWindow:
             self.auto_scan_job = None
         
         self.auto_scan_btn.config(
-            text="⚡ Enable Auto-Scan",
+            text="⚡ تفعيل المسح التلقائي",
             bg=SUCCESS_COLOR
         )
-        self.status_var.set("Auto-scan disabled")
+        self.status_var.set("تم تعطيل المسح التلقائي")
         logger.info("Auto-scan disabled")
     
     def _auto_scan_loop(self):
@@ -1501,18 +1455,18 @@ class ModernMainWindow:
                         self.current_card_uid = card_uid
                         self.card_uid_var.set(card_uid)
                         self.current_balance = balance
-                        self.balance_var.set(f"{balance:.2f} EGP")
+                        self.balance_var.set(f"{balance:.2f} جنيه")
                         
                         # Log the event
                         self._log_card_read(card_uid, is_new=is_new_card)
                         
                         # Update status
                         if card_amount is not None and card_amount != db_balance:
-                            self.status_var.set(f"🔄 Card synced: {card_uid} | Balance: {balance:.2f} EGP (was {db_balance:.2f})")
+                            self.status_var.set(f"🔄 تمت مزامنة البطاقة: {card_uid} | الرصيد: {balance:.2f} جنيه (كان {db_balance:.2f})")
                         elif is_new_card:
-                            self.status_var.set(f"✨ New card detected: {card_uid} | Balance: {balance:.2f} EGP")
+                            self.status_var.set(f"✨ تم اكتشاف بطاقة جديدة: {card_uid} | الرصيد: {balance:.2f} جنيه")
                         else:
-                            self.status_var.set(f"✓ Card detected: {card_uid} | Balance: {balance:.2f} EGP")
+                            self.status_var.set(f"✓ تم اكتشاف البطاقة: {card_uid} | الرصيد: {balance:.2f} جنيه")
                         
                         logger.info(f"Auto-scan loaded: {card_uid}, Balance: {balance:.2f} EGP, New: {is_new_card}")
                         
@@ -1529,3 +1483,4 @@ class ModernMainWindow:
 
 # Backward compatibility alias
 MainWindow = ModernMainWindow
+ 
