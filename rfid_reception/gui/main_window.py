@@ -407,7 +407,6 @@ class ModernMainWindow:
             ("📜 Cards History", self._show_card_history, SECONDARY_COLOR),
             ("🖨️ Print Last Receipt", self._print_last_receipt, WARNING_COLOR),
             ("📄 Print Card Summary", self._print_card_summary, WARNING_COLOR),
-            ("✏️ Insert Card Manual", self._show_manual_card_insert, WARNING_COLOR),
             ("📅 Daily Report", self._generate_daily_report_manual, PRIMARY_COLOR),
             ("🗓 Weekly Report", self._generate_weekly_report_manual, PRIMARY_COLOR),
             ("📆 Monthly Report", self._generate_monthly_report_manual, PRIMARY_COLOR),
@@ -919,10 +918,7 @@ class ModernMainWindow:
         from rfid_reception.gui.dialogs.view_all_cards_dialog import ViewAllCardsDialog
         ViewAllCardsDialog(self.root, self.db_service)
 
-    def _show_manual_card_insert(self):
-        """Show manual card insert dialog."""
-        from rfid_reception.gui.dialogs.manual_card_insert_dialog import ManualCardInsertDialog
-        ManualCardInsertDialog(self.root, self.db_service)
+   
     
     def _show_card_history(self):
         """Show card history dialog."""
