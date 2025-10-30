@@ -714,6 +714,7 @@ class ModernReportsGenerator:
         # Add header row with RTL processing
         header_row = [
             self._bidi_process("الرصيد (جنيه)"),
+            self._bidi_process("نسبة العرض (%)"),
             self._bidi_process("آخر شحن"),
             self._bidi_process("تاريخ الإنشاء"),
             self._bidi_process("معرّف البطاقة")
@@ -732,21 +733,30 @@ class ModernReportsGenerator:
             last_topup_str = self._bidi_process(ArabicTextHelper.format_date_arabic(last_topup)) if last_topup else self._bidi_process('غير متاح')
             
             balance = self._bidi_process(ArabicTextHelper.format_currency_arabic(card.get('balance', 0)))
+            # Offer %
+            offer_pct = card.get('offer_percent', 0)
+            try:
+                offer_str = f"{float(offer_pct):.0f}%"
+            except Exception:
+                offer_str = str(offer_pct)
+            offer_display = self._bidi_process(offer_str)
             
             # Add row with proper RTL order (reversed from English order)
             cards_data.append([
                 balance,
+                offer_display,
                 last_topup_str,
                 created_str,
                 self._bidi_process(card_uid)
             ])
         
-        # Calculate column widths based on content
+        # Calculate column widths based on content (include offer column)
         col_widths = [
             1.2 * inch,  # Balance
-            2.0 * inch,  # Last top-up
-            2.0 * inch,  # Created at
-            1.5 * inch   # Card UID
+            0.8 * inch,  # Offer %
+            1.8 * inch,  # Last top-up
+            1.8 * inch,  # Created at
+            1.2 * inch   # Card UID
         ]
         
         # Create and style the cards table
@@ -838,7 +848,7 @@ class ViewAllCardsDialog(tk.Toplevel):
     def __init__(self, parent, db_service):
         super().__init__(parent)
         self.db_service = db_service
-        self.title("Card Management System - View All Cards")
+        self.title("نظام إدارة البطاقات - عرض جميع البطاقات")
         self.geometry("1000x700")
         self.resizable(True, True)
         self.minsize(800, 500)
@@ -846,9 +856,11 @@ class ViewAllCardsDialog(tk.Toplevel):
         # Configure window style
         self.configure(bg=self.LIGHT_BG)
         
-        # Fetch cards data
+        # Fetch cards data with offer_percent
         try:
             self.cards = self.db_service.get_all_cards()
+            # Ensure each card has offer_percent field by querying directly if needed
+            self._enrich_cards_with_offer_data()
         except AttributeError:
             self.cards = []
             logging.warning("db_service.get_all_cards() not found; using empty list")
@@ -858,6 +870,52 @@ class ViewAllCardsDialog(tk.Toplevel):
         self.setup_ui()
         self.protocol("WM_DELETE_WINDOW", self.on_close)
     
+    def _enrich_cards_with_offer_data(self):
+        """Fetch offer_percent from database for each card if missing."""
+        logger.info("Enriching cards with offer data...")
+        
+        # SQLAlchemy uses 'engine' to get raw connections
+        if not hasattr(self.db_service, 'engine'):
+            logger.error("Cannot access database engine!")
+            for card in self.cards:
+                card['offer_percent'] = 0
+            return
+        
+        # Get a raw connection from SQLAlchemy engine
+        conn = self.db_service.engine.raw_connection()
+        
+        try:
+            for card in self.cards:
+                card_uid = card.get('card_uid')
+                logger.debug(f"Processing card {card_uid}, current offer_percent: {card.get('offer_percent')}")
+                
+                try:
+                    cursor = conn.cursor()
+                    
+                    # Fetch the value directly
+                    cursor.execute(
+                        "SELECT offer_percent FROM cards WHERE card_uid = ?",
+                        (card_uid,)
+                    )
+                    result = cursor.fetchone()
+                    cursor.close()
+                    
+                    if result and result[0] is not None:
+                        fetched_value = float(result[0])
+                        card['offer_percent'] = fetched_value
+                        logger.debug(f"✓ Fetched offer_percent={fetched_value}% for card {card_uid}")
+                    else:
+                        card['offer_percent'] = 0.0
+                        logger.debug(f"Card {card_uid}: No offer_percent found, defaulting to 0%")
+                        
+                except Exception as e:
+                    logger.error(f"Error fetching offer_percent for {card_uid}: {e}", exc_info=True)
+                    card['offer_percent'] = 0.0
+        
+        finally:
+            conn.close()
+            logger.info("Finished enriching cards with offer data")
+
     def setup_styles(self):
         """Configure modern ttk styles."""
         style = ttk.Style()
@@ -934,18 +992,18 @@ class ViewAllCardsDialog(tk.Toplevel):
         title_frame.pack(fill='both', expand=True, padx=20, pady=15)
         
         title_label = tk.Label(title_frame, 
-                              text="🎫 Card Management System",
+                              text="🎫 نظام إدارة البطاقات",
                               font=('Segoe UI', 18, 'bold'),
                               fg='white',
                               bg=self.PRIMARY_COLOR)
-        title_label.pack(side='left')
+        title_label.pack(side='right')
         
         subtitle_label = tk.Label(title_frame,
-                                 text=f"Viewing {len(self.cards)} card(s)",
+                                 text=f"عرض {ArabicTextHelper.to_arabic_numerals(len(self.cards))} بطاقة",
                                  font=('Segoe UI', 11),
                                  fg='#E8F4F8',
                                  bg=self.PRIMARY_COLOR)
-        subtitle_label.pack(side='left', padx=(20, 0))
+        subtitle_label.pack(side='right', padx=(20, 0))
     
     def _create_stats_panel(self):
         """Create statistics panel showing key metrics."""
@@ -958,9 +1016,9 @@ class ViewAllCardsDialog(tk.Toplevel):
         total_cards = len(self.cards)
         
         stats_data = [
-            ("📊 Total Cards", str(total_cards), self.PRIMARY_COLOR),
-            ("💰 Total Balance", f"EGP {total_balance:,.2f}", self.SUCCESS_COLOR),
-            ("📈 Average Balance", f"EGP {avg_balance:,.2f}", self.SECONDARY_COLOR),
+            ("📊 إجمالي البطاقات", ArabicTextHelper.to_arabic_numerals(total_cards), self.PRIMARY_COLOR),
+            ("💰 الرصيد الإجمالي", f"{ArabicTextHelper.format_currency_arabic(total_balance)} جنيه", self.SUCCESS_COLOR),
+            ("📈 متوسط الرصيد", f"{ArabicTextHelper.format_currency_arabic(avg_balance)} جنيه", self.SECONDARY_COLOR),
         ]
         
         for i, (label, value, color) in enumerate(stats_data):
@@ -970,44 +1028,26 @@ class ViewAllCardsDialog(tk.Toplevel):
         """Create individual stat card."""
         card = tk.Frame(parent, bg=self.CARD_BG, relief='flat', bd=1)
         card.configure(highlightbackground=self.BORDER_COLOR, highlightthickness=1)
-        card.pack(side='left', expand=True, fill='both', padx=(0, 10) if index < 2 else 0)
+        card.pack(side='right', expand=True, fill='both', padx=(10, 0) if index < 2 else 0)
         
         label_widget = tk.Label(card,
                                text=label,
                                font=('Segoe UI', 10),
                                fg=self.TEXT_SECONDARY,
                                bg=self.CARD_BG)
-        label_widget.pack(padx=15, pady=8, anchor='w')
+        label_widget.pack(padx=15, pady=8, anchor='e')
         
         value_widget = tk.Label(card,
                                text=value,
                                font=('Segoe UI', 14, 'bold'),
                                fg=color,
                                bg=self.CARD_BG)
-        value_widget.pack(padx=15, pady=(0, 8), anchor='w')
+        value_widget.pack(padx=15, pady=(0, 8), anchor='e')
     
     def _create_search_section(self):
         """Create search and filter controls."""
         search_frame = tk.Frame(self, bg=self.LIGHT_BG)
         search_frame.pack(fill='x', padx=15, pady=(0, 15))
-        
-        search_label = tk.Label(search_frame,
-                               text="🔍 Search Cards",
-                               font=('Segoe UI', 10, 'bold'),
-                               fg=self.TEXT_PRIMARY,
-                               bg=self.LIGHT_BG)
-        search_label.pack(side='left', padx=(0, 10))
-        
-        search_entry = tk.Entry(search_frame,
-                               font=('Segoe UI', 10),
-                               width=30,
-                               relief='flat',
-                               bd=1)
-        search_entry.configure(highlightbackground=self.BORDER_COLOR, 
-                              highlightthickness=1,
-                              bg=self.CARD_BG)
-        search_entry.pack(side='left', padx=(0, 10), ipady=5)
-        search_entry.bind('<KeyRelease>', lambda e: self._filter_cards(search_entry.get()))
         
         # Clear button
         clear_btn = tk.Label(search_frame,
@@ -1016,9 +1056,29 @@ class ViewAllCardsDialog(tk.Toplevel):
                             fg=self.WARNING_COLOR,
                             bg=self.LIGHT_BG,
                             cursor='hand2')
-        clear_btn.pack(side='left', padx=5)
+        clear_btn.pack(side='right', padx=5)
+        
+        search_entry = tk.Entry(search_frame,
+                               font=('Segoe UI', 10),
+                               width=30,
+                               relief='flat',
+                               bd=1,
+                               justify='right')
+        search_entry.configure(highlightbackground=self.BORDER_COLOR, 
+                              highlightthickness=1,
+                              bg=self.CARD_BG)
+        search_entry.pack(side='right', padx=(0, 10), ipady=5)
+        search_entry.bind('<KeyRelease>', lambda e: self._filter_cards(search_entry.get()))
+        
         clear_btn.bind('<Button-1>', lambda e: (search_entry.delete(0, 'end'), 
                                                  self._filter_cards('')))
+        
+        search_label = tk.Label(search_frame,
+                               text="🔍 البحث عن البطاقات",
+                               font=('Segoe UI', 10, 'bold'),
+                               fg=self.TEXT_PRIMARY,
+                               bg=self.LIGHT_BG)
+        search_label.pack(side='right', padx=(0, 10))
     
     def _filter_cards(self, search_text):
         """Filter cards based on search text."""
@@ -1035,24 +1095,25 @@ class ViewAllCardsDialog(tk.Toplevel):
         
         # Scrollbar styling
         scrollbar = ttk.Scrollbar(table_frame)
-        scrollbar.pack(side='right', fill='y')
+        scrollbar.pack(side='left', fill='y')
         
-        columns = ("UID", "Balance", "Employee", "Status")  # Removed "Created At" and "Last Top-Up"
+        # Add Offer % column to track offer percentage per card - Arabic headers
+        columns = ("الحالة", "الموظف", "نسبة العرض %", "الرصيد", "معرّف البطاقة")
         self.tree = ttk.Treeview(table_frame, 
-                                columns=columns,
-                                show='headings',
-                                height=15,
-                                yscrollcommand=scrollbar.set)
+                                 columns=columns,
+                                 show='headings',
+                                 height=15,
+                                 yscrollcommand=scrollbar.set)
         
         scrollbar.config(command=self.tree.yview)
         
-        # Configure columns
-        col_widths = [140, 110, 130, 80]  # Adjusted for 4 columns
-        col_anchors = ['w', 'center', 'w', 'center']  # Adjusted for 4 columns
+        # Configure columns (reversed order for RTL)
+        col_widths = [80, 130, 90, 110, 140]  # Status, Employee, Offer%, Balance, UID
+        col_anchors = ['center', 'e', 'center', 'center', 'e']
         
         for i, (col, width, anchor) in enumerate(zip(columns, col_widths, col_anchors)):
-            self.tree.heading(col, text=col)
-            self.tree.column(col, width=width, anchor=anchor)
+             self.tree.heading(col, text=col)
+             self.tree.column(col, width=width, anchor=anchor)
         
         # Add alternating row colors
         self.tree.tag_configure('oddrow', background=self.CARD_BG)
@@ -1068,6 +1129,8 @@ class ViewAllCardsDialog(tk.Toplevel):
         for item in self.tree.get_children():
             self.tree.delete(item)
         
+        logger.info(f"Populating table with {len(self.filtered_cards)} cards")
+        
         # Populate with filtered cards
         for i, card in enumerate(self.filtered_cards):
             uid = card.get('card_uid', 'N/A')
@@ -1075,53 +1138,46 @@ class ViewAllCardsDialog(tk.Toplevel):
             employee = card.get('employee_name', 'N/A')
             
             # Determine status
-            status = "✓ Active" if balance > 0 else "⚠ Empty"
+            status = "✓ نشط" if balance > 0 else "⚠ فارغ"
             
+            # Get offer percent - with detailed logging
+            offer_pct = card.get('offer_percent', 0)
+            logger.debug(f"Card {uid}: offer_percent from dict = {offer_pct}")
+            
+            try:
+                offer_display = f"{float(offer_pct):.0f}%" if offer_pct else "0%"
+                offer_display = ArabicTextHelper.process_arabic_text(offer_display)
+            except Exception as e:
+                logger.error(f"Error formatting offer for {uid}: {e}")
+                offer_display = "0%"
+            
+            logger.debug(f"Card {uid}: Displaying offer as '{offer_display}'")
+            
+            # Values in reversed order for RTL display
             values = (
-                uid[:12] + '...' if len(uid) > 12 else uid,
-                f"EGP {balance:.2f}",
-                employee if employee != 'N/A' else 'N/A',
-                status
-            )  # Removed created_str and last_topup_str
-            
+                status,
+                employee if employee != 'N/A' else 'غير متاح',
+                offer_display,
+                f"{ArabicTextHelper.format_currency_arabic(balance)} جنيه",
+                uid[:12] + '...' if len(uid) > 12 else uid
+            )
+
             tag = 'evenrow' if i % 2 == 0 else 'oddrow'
             self.tree.insert('', 'end', values=values, tags=(tag, 'positive' if balance > 0 else ''))
-    
+        
+        logger.info("Table population complete")
+
     def _create_footer(self):
         """Create footer with action buttons."""
         footer_frame = tk.Frame(self, bg=self.LIGHT_BG)
         footer_frame.pack(fill='x', padx=15, pady=15)
         
-        # Left side info
-        info_label = tk.Label(footer_frame,
-                             text=f"Showing {len(self.filtered_cards)} of {len(self.cards)} cards",
-                             font=('Segoe UI', 9),
-                             fg=self.TEXT_SECONDARY,
-                             bg=self.LIGHT_BG)
-        info_label.pack(side='left')
-        
-        # Spacer
-        spacer = tk.Frame(footer_frame, bg=self.LIGHT_BG)
-        spacer.pack(side='left', expand=True)
-        
-        # Action buttons
+        # Action buttons (right side in RTL)
         button_frame = tk.Frame(footer_frame, bg=self.LIGHT_BG)
         button_frame.pack(side='right')
         
-        export_btn = tk.Button(button_frame,
-                              text="📄 Export Arabic PDF",
-                              font=('Segoe UI', 10, 'bold'),
-                              bg=self.SUCCESS_COLOR,
-                              fg='white',
-                              relief='flat',
-                              cursor='hand2',
-                              padx=15,
-                              pady=8,
-                              command=self.export_arabic_pdf)
-        export_btn.pack(side='left', padx=(0, 10))
-        
         close_btn = tk.Button(button_frame,
-                             text="✕ Close",
+                             text="✕ إغلاق",
                              font=('Segoe UI', 10, 'bold'),
                              bg='#E8E8E8',
                              fg=self.TEXT_PRIMARY,
@@ -1131,22 +1187,46 @@ class ViewAllCardsDialog(tk.Toplevel):
                              pady=8,
                              command=self.on_close)
         close_btn.pack(side='left')
+        
+        export_btn = tk.Button(button_frame,
+                              text="📄 تصدير PDF عربي",
+                              font=('Segoe UI', 10, 'bold'),
+                              bg=self.SUCCESS_COLOR,
+                              fg='white',
+                              relief='flat',
+                              cursor='hand2',
+                              padx=15,
+                              pady=8,
+                              command=self.export_arabic_pdf)
+        export_btn.pack(side='left', padx=(10, 0))
+        
+        # Spacer
+        spacer = tk.Frame(footer_frame, bg=self.LIGHT_BG)
+        spacer.pack(side='right', expand=True)
+        
+        # Left side info (actually right in RTL)
+        info_label = tk.Label(footer_frame,
+                             text=f"عرض {ArabicTextHelper.to_arabic_numerals(len(self.filtered_cards))} من {ArabicTextHelper.to_arabic_numerals(len(self.cards))} بطاقة",
+                             font=('Segoe UI', 9),
+                             fg=self.TEXT_SECONDARY,
+                             bg=self.LIGHT_BG)
+        info_label.pack(side='right')
     
     def export_arabic_pdf(self):
         """Export all cards to an Arabic PDF report."""
         if not self.cards:
-            messagebox.showwarning("No Cards", 
-                                 "No cards available to export.",
+            messagebox.showwarning("لا توجد بطاقات", 
+                                 "لا توجد بطاقات متاحة للتصدير.",
                                  parent=self)
             return
         
-        default_filename = f"arabic_cards_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        default_filename = f"تقرير_البطاقات_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
         output_path = filedialog.asksaveasfilename(
             parent=self,
             defaultextension=".pdf",
-            filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
+            filetypes=[("ملفات PDF", "*.pdf"), ("جميع الملفات", "*.*")],
             initialfile=default_filename,
-            title="Save Arabic PDF Report"
+            title="حفظ تقرير PDF عربي"
         )
         
         if not output_path:
@@ -1156,16 +1236,16 @@ class ViewAllCardsDialog(tk.Toplevel):
             generator = ModernReportsGenerator(self.db_service, use_arabic=True)
             final_path = generator.generate_beautiful_arabic_report(self.cards, 
                                                                    output_path=output_path)
-            messagebox.showinfo("Export Successful",
-                              f"Arabic PDF report saved to:\n{final_path}",
+            messagebox.showinfo("نجح التصدير",
+                              f"تم حفظ تقرير PDF العربي في:\n{final_path}",
                               parent=self)
         except ImportError as e:
-            messagebox.showerror("Missing Dependencies",
-                               f"Required libraries are missing:\n{e}",
+            messagebox.showerror("مكتبات مفقودة",
+                               f"المكتبات المطلوبة مفقودة:\n{e}",
                                parent=self)
         except Exception as e:
-            messagebox.showerror("Export Failed",
-                               f"An error occurred:\n{e}",
+            messagebox.showerror("فشل التصدير",
+                               f"حدث خطأ:\n{e}",
                                parent=self)
     
     def on_close(self):
