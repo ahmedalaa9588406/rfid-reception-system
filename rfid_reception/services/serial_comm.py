@@ -192,6 +192,83 @@ class SerialCommunicationService:
         
         return False, "", "Failed to write card after retries"
     
+    def read_history(self, retries=3) -> Tuple[bool, str, list]:
+        """
+        Request Arduino to read game history from card blocks 9-15.
+        
+        Returns:
+            Tuple[bool, str, list]: (success, uid_or_error, history_entries)
+            history_entries is a list of dicts: [{"block": 9, "data": "A:50#B:30#"}]
+        """
+        if not self.is_connected or not self.connection:
+            return False, "Not connected to Arduino", []
+        
+        for attempt in range(retries):
+            try:
+                # Clear input buffer before sending command
+                if hasattr(self.connection, "reset_input_buffer"):
+                    self.connection.reset_input_buffer()
+                
+                # Send read history command
+                self.connection.write(b"READ_HISTORY\n")
+                self.connection.flush()
+                
+                # Wait for response with timeout
+                end_time = time.time() + 6.0  # 6 second timeout
+                uid = None
+                history_entries = []
+                reading_history = False
+                
+                while time.time() < end_time:
+                    if self.connection.in_waiting > 0:
+                        response = self.connection.readline().decode('utf-8', errors='ignore').strip()
+                        if not response:
+                            continue
+                        
+                        if response.startswith("HISTORY_START:"):
+                            uid = response.split(":", 1)[1]
+                            reading_history = True
+                            logger.info(f"Reading history for card: {uid}")
+                        elif response.startswith("HISTORY_BLOCK:"):
+                            # Format: HISTORY_BLOCK:<block_num>:<data>
+                            parts = response.split(":", 2)
+                            if len(parts) >= 3:
+                                block_num = int(parts[1])
+                                block_data = parts[2] if len(parts) > 2 else ""
+                                history_entries.append({
+                                    "block": block_num,
+                                    "data": block_data
+                                })
+                                logger.debug(f"Block {block_num}: {block_data}")
+                        elif response == "HISTORY_END":
+                            logger.info(f"History read complete: {len(history_entries)} blocks")
+                            return True, uid, history_entries
+                        elif response.startswith("ERROR:"):
+                            error_msg = response.split(":", 1)[1]
+                            logger.warning(f"Error reading history: {error_msg}")
+                            return False, error_msg, []
+                        elif response.startswith("STATUS:"):
+                            # Informational message, log and keep waiting
+                            logger.debug(f"Arduino status: {response}")
+                            continue
+                        else:
+                            # Ignore other messages
+                            logger.debug(f"Ignoring message during history read: {response}")
+                    
+                    time.sleep(0.05)
+                
+                if attempt < retries - 1:
+                    logger.debug(f"Read history attempt {attempt + 1} timed out, retrying...")
+                    time.sleep(0.3)
+                    
+            except serial.SerialException as e:
+                logger.error(f"Serial error during history read (attempt {attempt + 1}): {e}")
+                if attempt < retries - 1:
+                    time.sleep(0.5)
+        
+        return False, "Failed to read history after retries", []
+    
+    
     def check_connection(self) -> bool:
         """Check if serial connection is alive."""
         if not self.connection or not self.connection.is_open:
