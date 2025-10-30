@@ -61,7 +61,7 @@ class ReceiptPrinter:
             transaction_id: Transaction ID from database
             employee: Employee who processed the transaction
             timestamp: Transaction timestamp (defaults to now)
-            auto_print: If True, sends to printer automatically; if False, saves as PDF
+            auto_print: If True, attempts direct printing; if False, saves as PDF
         
         Returns:
             Tuple of (success, message/path)
@@ -78,12 +78,9 @@ class ReceiptPrinter:
             'timestamp': timestamp
         }
         
-        # Try direct printing first if available and auto_print is True
-        if auto_print and self.printer_available:
-            return self._print_to_printer(receipt_data)
-        else:
-            # Fallback to PDF
-            return self._print_to_pdf(receipt_data)
+        # Always save to PDF (silent, no dialogs)
+        # Direct printing is unreliable, so we skip it
+        return self._print_to_pdf(receipt_data)
     
     def _print_to_printer(self, receipt_data: Dict[str, Any]) -> tuple[bool, str]:
         """Print receipt directly to default printer (Windows)."""
@@ -340,9 +337,9 @@ class ReceiptPrinter:
             from reportlab.lib.units import mm
             from reportlab.pdfgen import canvas
             
-            # Generate filename
+            # Auto-generate filename in receipts folder
             timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"card_summary_{card_data['card_uid']}_{timestamp_str}.pdf"
+            filename = f"card_summary_{card_data['card_uid'][:8]}_{timestamp_str}.pdf"
             
             receipts_dir = os.path.join(os.getcwd(), "receipts")
             os.makedirs(receipts_dir, exist_ok=True)
@@ -416,5 +413,16 @@ class ReceiptPrinter:
                            f"Balance: {txn.get('balance_after', 0):.2f} EGP")
                 c.drawString(margin + 0.2 * inch, y, txn_line)
                 y -= 0.18 * inch
+                
+                # Check if we need a new page
+                if y < margin:
+                    c.showPage()
+                    y = height - margin
+                    c.setFont("Helvetica", 10)
         
+        # Footer or final page handling
+        # (No duplicate c.showPage() or c.setFont() here)
+        
+        # IMPORTANT: Show the page to finalize the content
         c.showPage()
+        

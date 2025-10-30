@@ -690,31 +690,28 @@ class ModernMainWindow:
 
         # Parse input
         input_type, amount, display_value = self._parse_input(input_value)
-        mode = "Manual" if self.manual_mode else "Arduino"
         
         if input_type == 'numeric':
-            # Regular numeric input
-            if messagebox.askyesno("Confirm", f"Add {amount:.2f} EGP to {self.current_card_uid}?\nMode: {mode}"):
-                self.status_var.set("Processing top-up...")
-                self.root.update_idletasks()
-                if self.manual_mode:
-                    self._manual_top_up(amount, display_value)
-                else:
-                    self._arduino_top_up(amount, display_value)
+            # Regular numeric input - no confirmation
+            self.status_var.set("Processing top-up...")
+            self.root.update_idletasks()
+            if self.manual_mode:
+                self._manual_top_up(amount, display_value)
+            else:
+                self._arduino_top_up(amount, display_value)
                     
         elif input_type == 'k_amount':
-            # K-prefixed amount (e.g., K50)
-            if messagebox.askyesno("Confirm K-Amount", f"Add {amount:.2f} EGP (K-Amount) to {self.current_card_uid}?\nCard will store: '{display_value}'\nMode: {mode}"):
-                self.status_var.set("Processing K-amount top-up...")
-                self.root.update_idletasks()
-                if self.manual_mode:
-                    self._manual_top_up(amount, display_value)
-                else:
-                    self._arduino_top_up(amount, display_value)
+            # K-prefixed amount (e.g., K50) - no confirmation
+            self.status_var.set("Processing K-amount top-up...")
+            self.root.update_idletasks()
+            if self.manual_mode:
+                self._manual_top_up(amount, display_value)
+            else:
+                self._arduino_top_up(amount, display_value)
                     
         else:
-            # String input - only write to card
-            if messagebox.askyesno("Confirm", f"Write '{display_value}' to card {self.current_card_uid}?\nMode: {mode}\n\nNote: Balance will NOT be updated in database."):
+            # String input - only write to card (keep confirmation for strings)
+            if messagebox.askyesno("Confirm", f"Write '{display_value}' to card {self.current_card_uid}?\n\nNote: Balance will NOT be updated in database."):
                 self.status_var.set("Writing string to card...")
                 self.root.update_idletasks()
                 if self.manual_mode:
@@ -722,6 +719,28 @@ class ModernMainWindow:
                 else:
                     self._arduino_write_string(display_value)
 
+    def _print_receipt(self, card_uid, amount, balance_after, transaction_id):
+        """Print receipt for transaction silently in background."""
+        try:
+            employee = self.config.get("employee_name", "Receptionist")
+            success, result = self.receipt_printer.print_receipt(
+                card_uid=card_uid,
+                amount=amount,
+                balance_after=balance_after,
+                transaction_id=transaction_id,
+                employee=employee,
+                timestamp=datetime.now(),
+                auto_print=True
+            )
+            
+            if success:
+                # Silent - just log it
+                logger.info(f"Receipt saved to: {result}")
+            else:
+                logger.error(f"Receipt printing failed: {result}")
+        except Exception as e:
+            logger.error(f"Receipt printing error: {e}")
+    
     def _manual_top_up(self, amount, display_value):
         """Handle manual top-up."""
         try:
@@ -733,14 +752,11 @@ class ModernMainWindow:
             )
             self._update_balance(new_bal)
             
-            # Print receipt if enabled
+            # Print receipt if enabled (silent)
             if self.auto_print_receipts:
                 self._print_receipt(self.current_card_uid, amount, new_bal, tx_id)
             
-            messagebox.showinfo(
-                "Success (Manual)",
-                f"Added {amount:.2f} EGP\nNew Balance: {new_bal:.2f} EGP\n(Note: Physical card not updated)"
-            )
+            self.status_var.set(f"✓ Added {amount:.2f} EGP | New Balance: {new_bal:.2f} EGP (Manual)")
         except Exception as e:
             logger.error(f"Manual top-up error: {e}")
             messagebox.showerror("DB Error", str(e))
@@ -751,31 +767,11 @@ class ModernMainWindow:
         new_balance_expected = self.current_balance + amount
         
         # Determine what to write to card (new total balance)
-        # For K-amounts, keep the K prefix; for numeric, write the new total
         if display_value.startswith('K'):
-            # K-amount: write K + new total balance
             card_write_value = f"K{new_balance_expected:.0f}"
         else:
-            # Regular amount: write new total balance
             card_write_value = str(new_balance_expected)
         
-        # Show clear instructions with messagebox warning
-        result = messagebox.askokcancel(
-            "Important - Keep Card on Reader",
-            f"⚠️ PLEASE KEEP THE CARD ON THE READER!\n\n"
-            f"Adding {amount:.2f} EGP to card.\n"
-            f"New balance will be: {new_balance_expected:.2f} EGP\n"
-            f"Card will store: '{card_write_value}'\n\n"
-            f"Do NOT remove the card until you see a success message.\n\n"
-            f"Click OK when the card is on the reader and you're ready.",
-            icon='warning'
-        )
-        
-        if not result:
-            self.status_var.set("Write operation cancelled")
-            return
-        
-        # Show clear instructions to user
         self.status_var.set(f"⏳ Writing '{card_write_value}' to card... KEEP CARD ON READER!")
         self.root.update()
         self.root.update_idletasks()
@@ -791,12 +787,11 @@ class ModernMainWindow:
                 )
                 self._update_balance(new_bal)
                 
-                # Print receipt if enabled
+                # Print receipt if enabled (silent)
                 if self.auto_print_receipts:
                     self._print_receipt(self.current_card_uid, amount, new_bal, tx_id)
                 
-                self.status_var.set(f"✓ Successfully wrote {card_write_value} to card!")
-                messagebox.showinfo("Success", f"Added {amount:.2f} EGP\nNew Balance: {new_bal:.2f} EGP\nCard now stores: '{card_write_value}'")
+                self.status_var.set(f"✓ Added {amount:.2f} EGP | New Balance: {new_bal:.2f} EGP | Card: '{card_write_value}'")
             except Exception as e:
                 logger.error(f"DB error after write: {e}")
                 self.status_var.set(f"❌ Database error: {str(e)}")
@@ -807,20 +802,6 @@ class ModernMainWindow:
     
     def _arduino_write_string(self, text_data):
         """Handle Arduino string write (no database update)."""
-        # Show clear instructions with messagebox warning
-        result = messagebox.askokcancel(
-            "Important - Keep Card on Reader",
-            f"⚠️ PLEASE KEEP THE CARD ON THE READER!\n\n"
-            f"The system will now write '{text_data}' to the card.\n"
-            f"Do NOT remove the card until you see a success message.\n\n"
-            f"Click OK when the card is on the reader and you're ready.",
-            icon='warning'
-        )
-        
-        if not result:
-            self.status_var.set("Write operation cancelled")
-            return
-        
         # Show clear instructions to user
         self.status_var.set(f"⏳ Writing '{text_data}' to card... KEEP CARD ON READER!")
         self.root.update()
@@ -841,34 +822,6 @@ class ModernMainWindow:
         self.balance_var.set(f"{new_balance:.2f} EGP")
         self.amount_var.set("")
         self.status_var.set("Top-up successful")
-    
-    def _print_receipt(self, card_uid, amount, balance_after, transaction_id):
-        """Print receipt for transaction."""
-        try:
-            employee = self.config.get("employee_name", "Receptionist")
-            success, result = self.receipt_printer.print_receipt(
-                card_uid=card_uid,
-                amount=amount,
-                balance_after=balance_after,
-                transaction_id=transaction_id,
-                employee=employee,
-                timestamp=datetime.now(),
-                auto_print=True
-            )
-            
-            if success:
-                if result.endswith('.pdf'):
-                    logger.info(f"Receipt saved to: {result}")
-                    self.status_var.set(f"Receipt saved: {os.path.basename(result)}")
-                else:
-                    logger.info(f"Receipt printed: {result}")
-                    self.status_var.set("Receipt printed successfully")
-            else:
-                logger.error(f"Receipt printing failed: {result}")
-                self.status_var.set("Receipt printing failed")
-        except Exception as e:
-            logger.error(f"Receipt printing error: {e}")
-            self.status_var.set(f"Receipt error: {str(e)}")
     
     def _print_last_receipt(self):
         """Print receipt for last transaction."""
@@ -897,10 +850,12 @@ class ModernMainWindow:
             )
             
             if success:
-                messagebox.showinfo("Receipt Saved", f"Receipt saved to:\n{result}")
-                # Optionally open the PDF
-                if messagebox.askyesno("Open Receipt", "Would you like to open the receipt?"):
+                # Auto-open the PDF
+                try:
                     os.startfile(result)
+                    self.status_var.set(f"Receipt opened: {os.path.basename(result)}")
+                except Exception as e:
+                    self.status_var.set(f"Receipt saved: {os.path.basename(result)}")
             else:
                 messagebox.showerror("Print Failed", result)
         except Exception as e:
@@ -924,9 +879,12 @@ class ModernMainWindow:
             )
             
             if success:
-                messagebox.showinfo("Summary Saved", f"Card summary saved to:\n{result}")
-                if messagebox.askyesno("Open Summary", "Would you like to open the summary?"):
+                # Auto-open the PDF
+                try:
                     os.startfile(result)
+                    self.status_var.set(f"Summary opened: {os.path.basename(result)}")
+                except Exception as e:
+                    self.status_var.set(f"Summary saved: {os.path.basename(result)}")
             else:
                 messagebox.showerror("Print Failed", result)
         except Exception as e:
@@ -1018,7 +976,8 @@ class ModernMainWindow:
             date_str = simpledialog.askstring(
                 "Daily Report", "Enter date (YYYY-MM-DD) or leave blank for today:", parent=self.root
             )
-            # Compute default filename
+            
+            # Compute date
             if date_str:
                 try:
                     d = datetime.strptime(date_str, '%Y-%m-%d').date()
@@ -1028,22 +987,24 @@ class ModernMainWindow:
             else:
                 d = datetime.now().date()
 
-            default_name = f"daily_report_{d.strftime('%Y%m%d')}.pdf"
-            save_path = filedialog.asksaveasfilename(
-                title="Save Daily Report As",
-                defaultextension=".pdf",
-                filetypes=[("PDF files", "*.pdf")],
-                initialfile=default_name,
-                parent=self.root
-            )
-            if not save_path:
-                return
+            # Auto-generate filename in reports folder
+            reports_dir = os.path.join(os.getcwd(), "reports")
+            os.makedirs(reports_dir, exist_ok=True)
+            
+            filename = f"daily_report_{d.strftime('%Y%m%d')}.pdf"
+            save_path = os.path.join(reports_dir, filename)
 
             if date_str:
                 path = self.reports_generator.generate_daily_report(date_str, output_path=save_path)
             else:
                 path = self.reports_generator.generate_daily_report(output_path=save_path)
-            messagebox.showinfo("Daily Report", f"Generated:\n{path}")
+            
+            # Auto-open the PDF
+            try:
+                os.startfile(path)
+                messagebox.showinfo("Daily Report", f"Report opened successfully!\n\nSaved to:\n{path}")
+            except Exception as e:
+                messagebox.showinfo("Daily Report", f"Report generated:\n{path}\n\nPlease open it manually.")
         except Exception as e:
             logger.error(f"Daily report error: {e}")
             messagebox.showerror("Daily Report", str(e))
@@ -1056,7 +1017,8 @@ class ModernMainWindow:
                 "Enter week start (YYYY-MM-DD, Monday). Leave blank for current week:",
                 parent=self.root
             )
-            # Determine start/end for default filename
+            
+            # Determine start/end
             if week_start:
                 try:
                     start = datetime.strptime(week_start, '%Y-%m-%d').date()
@@ -1068,22 +1030,24 @@ class ModernMainWindow:
                 start = today - timedelta(days=today.weekday())
             end = start + timedelta(days=6)
 
-            default_name = f"weekly_report_{start.strftime('%Y%m%d')}_to_{end.strftime('%Y%m%d')}.pdf"
-            save_path = filedialog.asksaveasfilename(
-                title="Save Weekly Report As",
-                defaultextension=".pdf",
-                filetypes=[("PDF files", "*.pdf")],
-                initialfile=default_name,
-                parent=self.root
-            )
-            if not save_path:
-                return
+            # Auto-generate filename in reports folder
+            reports_dir = os.path.join(os.getcwd(), "reports")
+            os.makedirs(reports_dir, exist_ok=True)
+            
+            filename = f"weekly_report_{start.strftime('%Y%m%d')}_to_{end.strftime('%Y%m%d')}.pdf"
+            save_path = os.path.join(reports_dir, filename)
 
             if week_start:
                 path = self.reports_generator.generate_weekly_report(week_start, output_path=save_path)
             else:
                 path = self.reports_generator.generate_weekly_report(output_path=save_path)
-            messagebox.showinfo("Weekly Report", f"Generated:\n{path}")
+            
+            # Auto-open the PDF
+            try:
+                os.startfile(path)
+                messagebox.showinfo("Weekly Report", f"Report opened successfully!\n\nSaved to:\n{path}")
+            except Exception as e:
+                messagebox.showinfo("Weekly Report", f"Report generated:\n{path}\n\nPlease open it manually.")
         except Exception as e:
             logger.error(f"Weekly report error: {e}")
             messagebox.showerror("Weekly Report", str(e))
@@ -1102,18 +1066,22 @@ class ModernMainWindow:
                 m = datetime.now().month
             if not y:
                 y = datetime.now().year
-            default_name = f"monthly_report_{y}{m:02d}.pdf"
-            save_path = filedialog.asksaveasfilename(
-                title="Save Monthly Report As",
-                defaultextension=".pdf",
-                filetypes=[("PDF files", "*.pdf")],
-                initialfile=default_name,
-                parent=self.root
-            )
-            if not save_path:
-                return
+            
+            # Auto-generate filename in reports folder
+            reports_dir = os.path.join(os.getcwd(), "reports")
+            os.makedirs(reports_dir, exist_ok=True)
+            
+            filename = f"monthly_report_{y}{m:02d}.pdf"
+            save_path = os.path.join(reports_dir, filename)
+            
             path = self.reports_generator.generate_monthly_report(m, y, output_path=save_path)
-            messagebox.showinfo("Monthly Report", f"Generated:\n{path}")
+            
+            # Auto-open the PDF
+            try:
+                os.startfile(path)
+                messagebox.showinfo("Monthly Report", f"Report opened successfully!\n\nSaved to:\n{path}")
+            except Exception as e:
+                messagebox.showinfo("Monthly Report", f"Report generated:\n{path}\n\nPlease open it manually.")
         except Exception as e:
             logger.error(f"Monthly report error: {e}")
             messagebox.showerror("Monthly Report", str(e))
@@ -1126,18 +1094,22 @@ class ModernMainWindow:
             )
             if not y:
                 y = datetime.now().year
-            default_name = f"yearly_report_{y}.pdf"
-            save_path = filedialog.asksaveasfilename(
-                title="Save Yearly Report As",
-                defaultextension=".pdf",
-                filetypes=[("PDF files", "*.pdf")],
-                initialfile=default_name,
-                parent=self.root
-            )
-            if not save_path:
-                return
+            
+            # Auto-generate filename in reports folder
+            reports_dir = os.path.join(os.getcwd(), "reports")
+            os.makedirs(reports_dir, exist_ok=True)
+            
+            filename = f"yearly_report_{y}.pdf"
+            save_path = os.path.join(reports_dir, filename)
+            
             path = self.reports_generator.generate_yearly_report(y, output_path=save_path)
-            messagebox.showinfo("Yearly Report", f"Generated:\n{path}")
+            
+            # Auto-open the PDF
+            try:
+                os.startfile(path)
+                messagebox.showinfo("Yearly Report", f"Report opened successfully!\n\nSaved to:\n{path}")
+            except Exception as e:
+                messagebox.showinfo("Yearly Report", f"Report generated:\n{path}\n\nPlease open it manually.")
         except Exception as e:
             logger.error(f"Yearly report error: {e}")
             messagebox.showerror("Yearly Report", str(e))
@@ -1236,38 +1208,21 @@ class ModernMainWindow:
             messagebox.showerror("Invalid Amount", "Amount cannot be negative.")
             return
 
-        mode = "Manual" if self.manual_mode else "Arduino"
         current_balance = self.current_balance
         difference = amount - current_balance
         
-        prefix = "K-" if input_type == 'k_amount' else ""
-        msg = f"Set balance to {amount:.2f} EGP ({prefix}Amount)?\n"
-        if input_type == 'k_amount':
-            msg += f"Card will store: '{display_value}'\n\n"
-        else:
-            msg += "\n"
-            
-        if difference > 0:
-            msg += f"This will ADD {difference:.2f} EGP to the card.\n"
-        elif difference < 0:
-            msg += f"This will DEDUCT {abs(difference):.2f} EGP from the card.\n"
-        else:
-            msg += f"Balance is already {amount:.2f} EGP (no change).\n"
-        msg += f"\nCard: {self.current_card_uid}\nMode: {mode}"
-        
-        if messagebox.askyesno("Confirm Balance Write", msg):
-            self.status_var.set("Writing balance...")
-            self.root.update_idletasks()
+        # No confirmation - proceed directly
+        self.status_var.set("Writing balance...")
+        self.root.update_idletasks()
 
-            if self.manual_mode:
-                self._manual_write_balance(amount, difference, display_value)
-            else:
-                self._arduino_write_balance(amount, difference, display_value)
+        if self.manual_mode:
+            self._manual_write_balance(amount, difference, display_value)
+        else:
+            self._arduino_write_balance(amount, difference, display_value)
     
     def _manual_write_balance(self, new_balance, difference, display_value):
         """Handle manual balance write."""
         try:
-            # Use top_up with the difference (can be negative for deductions)
             if difference != 0:
                 final_balance, tx_id = self.db_service.top_up(
                     self.current_card_uid,
@@ -1277,46 +1232,26 @@ class ModernMainWindow:
                 )
                 self._update_balance(final_balance)
                 
-                # Print receipt if enabled
+                # Print receipt if enabled (silent)
                 if self.auto_print_receipts:
                     self._print_receipt(self.current_card_uid, difference, final_balance, tx_id)
                 
-                messagebox.showinfo(
-                    "Success (Manual)",
-                    f"Balance set to {new_balance:.2f} EGP\nCard value: {display_value}\n(Note: Physical card not updated in manual mode)"
-                )
+                self.status_var.set(f"✓ Balance set to {new_balance:.2f} EGP (Manual)")
             else:
-                messagebox.showinfo("No Change", "Balance is already at the specified amount.")
+                self.status_var.set("✓ Balance unchanged (already at specified amount)")
         except Exception as e:
             logger.error(f"Manual balance write error: {e}")
             messagebox.showerror("DB Error", str(e))
     
     def _arduino_write_balance(self, new_balance, difference, display_value):
         """Handle Arduino balance write."""
-        # Show clear instructions with messagebox warning
-        result = messagebox.askokcancel(
-            "Important - Keep Card on Reader",
-            f"⚠️ PLEASE KEEP THE CARD ON THE READER!\n\n"
-            f"The system will now write '{display_value}' to the card.\n"
-            f"Do NOT remove the card until you see a success message.\n\n"
-            f"Click OK when the card is on the reader and you're ready.",
-            icon='warning'
-        )
-        
-        if not result:
-            self.status_var.set("Write operation cancelled")
-            return
-        
-        # Show clear instructions
         self.status_var.set(f"⏳ Writing '{display_value}' to card... KEEP CARD ON READER!")
         self.root.update()
         self.root.update_idletasks()
         
-        # Write the display value to the card (e.g., "50" or "K50")
         success, uid, msg = self.serial_service.write_card(display_value)
         if success:
             try:
-                # Update database with the difference
                 if difference != 0:
                     final_balance, tx_id = self.db_service.top_up(
                         self.current_card_uid,
@@ -1326,15 +1261,13 @@ class ModernMainWindow:
                     )
                     self._update_balance(final_balance)
                     
-                    # Print receipt if enabled
+                    # Print receipt if enabled (silent)
                     if self.auto_print_receipts:
                         self._print_receipt(self.current_card_uid, difference, final_balance, tx_id)
                     
-                    self.status_var.set(f"✓ Successfully wrote '{display_value}' to card!")
-                    messagebox.showinfo("Success", f"Balance set to {new_balance:.2f} EGP\nCard data: '{display_value}'\nPhysical card updated successfully.")
+                    self.status_var.set(f"✓ Balance set to {new_balance:.2f} EGP | Card: '{display_value}'")
                 else:
-                    self.status_var.set(f"✓ Card updated with '{display_value}'")
-                    messagebox.showinfo("No Change", f"Balance is already at the specified amount.\nCard updated with: '{display_value}'")
+                    self.status_var.set(f"✓ Card updated with '{display_value}' (no balance change)")
             except Exception as e:
                 logger.error(f"DB error after write: {e}")
                 self.status_var.set(f"❌ Database error: {str(e)}")
@@ -1342,7 +1275,7 @@ class ModernMainWindow:
         else:
             self.status_var.set(f"❌ Write failed: {msg}")
             logger.warning(f"Write failed: {msg}")
-    
+
     def _toggle_auto_scan(self):
         """Toggle auto-scan mode on/off."""
         if self.auto_scan_enabled:
