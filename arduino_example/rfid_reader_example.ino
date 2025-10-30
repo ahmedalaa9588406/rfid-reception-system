@@ -34,6 +34,7 @@
  * - READ\n -> Returns UID:<card_uid>\n or ERROR:<message>\n (card is halted after read)
  * - READ_KEEP\n -> Returns UID:<card_uid>\n or ERROR:<message>\n (card stays active for immediate write)
  * - WRITE:<amount>\n -> Returns OK:WROTE:<uid>:<amount>\n or ERROR:<message>\n
+ * - READ_HISTORY\n -> Returns HISTORY_START:<uid>\n, HISTORY_BLOCK:<block>:<data>\n (for blocks 9-15), HISTORY_END\n
  * - PING\n -> Returns PONG\n
  * 
  * Installation:
@@ -84,9 +85,11 @@ void processCommand(String command);
 void handleRead();
 void handleReadKeep();
 void handleWrite(String data);
+void handleReadHistory();
 String getCardUID();
 bool writeCardData(String data);
 String readCardData();
+String readHistoryBlock(byte blockAddr);
 uint32_t calculateChecksum(const char* text);
 void blinkLED(int times, int delayMs);
 void setLED(bool state);
@@ -186,6 +189,9 @@ void processCommand(String command) {
     } else {
       handleWrite(data);
     }
+  }
+  else if (cmdUpper.equals("READ_HISTORY")) {
+    handleReadHistory();
   }
   else if (cmdUpper.equals("PING")) {
     Serial.println("PONG");
@@ -463,6 +469,100 @@ String readCardData() {
   // Ensure null termination
   cardData.text[sizeof(cardData.text) - 1] = '\0';
   return String(cardData.text);
+}
+
+void handleReadHistory() {
+  setLED(true);
+  
+  // Soft reset to ensure clean state
+  mfrc522.PCD_Init();
+  delay(100);
+  
+  // Wait for card with multiple attempts
+  unsigned long startTime = millis();
+  const unsigned long timeout = 5000; // 5 second timeout
+  
+  while (millis() - startTime < timeout) {
+    // Look for new cards
+    if (mfrc522.PICC_IsNewCardPresent()) {
+      delay(10);
+      // Select one of the cards
+      if (mfrc522.PICC_ReadCardSerial()) {
+        // Card detected successfully
+        String uid = getCardUID();
+        
+        // Send history start marker with UID
+        Serial.print("HISTORY_START:");
+        Serial.println(uid);
+        
+        // Read blocks 9 to 15 (history blocks)
+        for (byte block = 9; block <= 15; block++) {
+          String blockData = readHistoryBlock(block);
+          
+          // Send block data even if empty (Python will filter)
+          Serial.print("HISTORY_BLOCK:");
+          Serial.print(block);
+          Serial.print(":");
+          Serial.println(blockData);
+        }
+        
+        // Send history end marker
+        Serial.println("HISTORY_END");
+        
+        // Halt PICC
+        mfrc522.PICC_HaltA();
+        mfrc522.PCD_StopCrypto1();
+        
+        setLED(false);
+        blinkLED(2, 100);
+        return;
+      }
+    }
+    delay(50);
+  }
+  
+  // Timeout reached
+  setLED(false);
+  Serial.println("ERROR:No card detected (timeout)");
+}
+
+String readHistoryBlock(byte blockAddr) {
+  // Determine trailer block for authentication (every 4th block is trailer)
+  byte trailerBlock = (blockAddr / 4) * 4 + 3;
+  
+  // Default key for authentication
+  MFRC522::MIFARE_Key key;
+  for (byte i = 0; i < 6; i++) {
+    key.keyByte[i] = 0xFF;
+  }
+  
+  // Authenticate using key A
+  MFRC522::StatusCode status;
+  status = mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, trailerBlock, &key, &(mfrc522.uid));
+  if (status != MFRC522::STATUS_OK) {
+    return ""; // Return empty string on auth error
+  }
+  
+  // Read data from block
+  byte buffer[18];
+  byte size = sizeof(buffer);
+  status = mfrc522.MIFARE_Read(blockAddr, buffer, &size);
+  if (status != MFRC522::STATUS_OK) {
+    return ""; // Return empty string on read error
+  }
+  
+  // Convert buffer to readable string (filter printable characters)
+  String result = "";
+  for (int i = 0; i < 16; i++) {
+    if (buffer[i] >= 32 && buffer[i] <= 126) {
+      result += (char)buffer[i];
+    } else if (buffer[i] == 0) {
+      // Stop at null terminator
+      break;
+    }
+  }
+  
+  return result;
 }
 
 uint32_t calculateChecksum(const char* text) {

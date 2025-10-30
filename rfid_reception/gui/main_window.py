@@ -404,6 +404,7 @@ class ModernMainWindow:
         # Actions list
         actions = [
             ("🎫 View All Cards", self._show_all_cards, SUCCESS_COLOR),
+            ("📜 Cards History", self._show_card_history, SECONDARY_COLOR),
             ("🖨️ Print Last Receipt", self._print_last_receipt, WARNING_COLOR),
             ("📄 Print Card Summary", self._print_card_summary, WARNING_COLOR),
             ("✏️ Insert Card Manual", self._show_manual_card_insert, WARNING_COLOR),
@@ -545,6 +546,9 @@ class ModernMainWindow:
                         self.status_var.set(f"✓ Card loaded: {card_uid} | Balance: {balance:.2f} EGP")
                     
                     logger.info(f"Card read and saved: {card_uid}, Balance: {balance:.2f} EGP, New: {is_new_card}")
+                    
+                    # Automatically read and display card history
+                    self._read_and_show_history(card_uid)
                     
                 except Exception as e:
                     logger.error(f"Database error while saving card: {e}")
@@ -940,6 +944,53 @@ class ModernMainWindow:
         """Show manual card insert dialog."""
         from rfid_reception.gui.dialogs.manual_card_insert_dialog import ManualCardInsertDialog
         ManualCardInsertDialog(self.root, self.db_service)
+    
+    def _show_card_history(self):
+        """Show card history dialog."""
+        from rfid_reception.gui.dialogs.card_history_dialog import CardHistoryDialog
+        CardHistoryDialog(self.root, self.serial_service)
+    
+    def _read_and_show_history(self, card_uid):
+        """Read card history from Arduino and display in dialog automatically.
+        
+        Args:
+            card_uid: The UID of the card that was just read
+        """
+        if not self.serial_service.is_connected:
+            logger.info("Skipping history read - Arduino not connected")
+            return
+        
+        try:
+            # Update status
+            self.status_var.set(f"⏳ Reading game history from card...")
+            self.root.update_idletasks()
+            
+            # Read history from Arduino
+            success, uid_or_error, history_entries = self.serial_service.read_history()
+            
+            if success:
+                logger.info(f"History read successfully: {len(history_entries)} blocks")
+                
+                # Show history dialog with preloaded data
+                from rfid_reception.gui.dialogs.card_history_dialog import CardHistoryDialog
+                CardHistoryDialog(
+                    self.root, 
+                    self.serial_service,
+                    card_uid=uid_or_error,  # Use UID from history read
+                    history_data=history_entries
+                )
+                
+                # Update status
+                self.status_var.set(f"✓ Card loaded: {card_uid} | Balance: {self.current_balance:.2f} EGP | History displayed")
+            else:
+                # History read failed, but don't interrupt the main flow
+                logger.warning(f"Could not read history: {uid_or_error}")
+                self.status_var.set(f"✓ Card loaded: {card_uid} | Balance: {self.current_balance:.2f} EGP (history unavailable)")
+                
+        except Exception as e:
+            logger.error(f"Error reading card history: {e}")
+            # Don't show error popup, just log it
+            self.status_var.set(f"✓ Card loaded: {card_uid} | Balance: {self.current_balance:.2f} EGP")
 
     def _generate_daily_report_manual(self):
         try:
@@ -1374,6 +1425,9 @@ class ModernMainWindow:
                             self.status_var.set(f"✓ Card detected: {card_uid} | Balance: {balance:.2f} EGP")
                         
                         logger.info(f"Auto-scan loaded: {card_uid}, Balance: {balance:.2f} EGP, New: {is_new_card}")
+                        
+                        # Automatically read and display card history
+                        self._read_and_show_history(card_uid)
         
         except Exception as e:
             logger.error(f"Auto-scan error: {e}")
