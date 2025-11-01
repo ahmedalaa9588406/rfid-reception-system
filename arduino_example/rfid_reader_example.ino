@@ -35,6 +35,7 @@
  * - READ_KEEP\n -> Returns UID:<card_uid>\n or ERROR:<message>\n (card stays active for immediate write)
  * - WRITE:<amount>\n -> Returns OK:WROTE:<uid>:<amount>\n or ERROR:<message>\n
  * - READ_HISTORY\n -> Returns HISTORY_START:<uid>\n, HISTORY_BLOCK:<block>:<data>\n (for blocks 9-15), HISTORY_END\n
+ * - CLEAR_HISTORY\n -> Returns OK:HISTORY_CLEARED:<uid>\n or ERROR:<message>\n (clears blocks 9-15)
  * - PING\n -> Returns PONG\n
  * 
  * Installation:
@@ -86,6 +87,7 @@ void handleRead();
 void handleReadKeep();
 void handleWrite(String data);
 void handleReadHistory();
+void handleClearHistory();
 String getCardUID();
 bool writeCardData(String data);
 String readCardData();
@@ -192,6 +194,9 @@ void processCommand(String command) {
   }
   else if (cmdUpper.equals("READ_HISTORY")) {
     handleReadHistory();
+  }
+  else if (cmdUpper.equals("CLEAR_HISTORY")) {
+    handleClearHistory();
   }
   else if (cmdUpper.equals("PING")) {
     Serial.println("PONG");
@@ -563,6 +568,112 @@ String readHistoryBlock(byte blockAddr) {
   }
   
   return result;
+}
+
+void handleClearHistory() {
+  setLED(true);
+  Serial.println("STATUS:Ready to clear history - place card now...");
+  
+  // Hard reset to ensure card detection works
+  mfrc522.PCD_Reset();
+  delay(50);
+  mfrc522.PCD_Init();
+  delay(150);
+  mfrc522.PCD_AntennaOn();
+  delay(50);
+  
+  // Wait for card with timeout
+  unsigned long startTime = millis();
+  const unsigned long timeout = 8000; // 8 second timeout
+  unsigned long lastStatusTime = millis();
+  
+  while (millis() - startTime < timeout) {
+    // Send status update every 2 seconds
+    if (millis() - lastStatusTime > 2000) {
+      Serial.println("STATUS:Still waiting for card...");
+      lastStatusTime = millis();
+      blinkLED(1, 50);
+    }
+    
+    // Check for card multiple times
+    for (int i = 0; i < 5; i++) {
+      if (mfrc522.PICC_IsNewCardPresent()) {
+        delay(10);
+        if (mfrc522.PICC_ReadCardSerial()) {
+          // Card detected
+          Serial.println("STATUS:Card detected, clearing history...");
+          String uid = getCardUID();
+          
+          // Default key for authentication
+          MFRC522::MIFARE_Key key;
+          for (byte i = 0; i < 6; i++) {
+            key.keyByte[i] = 0xFF;
+          }
+          
+          // Empty block data (16 bytes of zeros)
+          byte emptyBlock[16];
+          memset(emptyBlock, 0, 16);
+          
+          bool allSuccess = true;
+          
+          // Clear blocks 9-15 (history blocks)
+          for (byte block = 9; block <= 15; block++) {
+            // Determine trailer block for authentication
+            byte trailerBlock = (block / 4) * 4 + 3;
+            
+            // Authenticate
+            MFRC522::StatusCode status = mfrc522.PCD_Authenticate(
+              MFRC522::PICC_CMD_MF_AUTH_KEY_A, 
+              trailerBlock, 
+              &key, 
+              &(mfrc522.uid)
+            );
+            
+            if (status != MFRC522::STATUS_OK) {
+              Serial.print("ERROR:Auth failed for block ");
+              Serial.println(block);
+              allSuccess = false;
+              break;
+            }
+            
+            // Write empty data to block
+            status = mfrc522.MIFARE_Write(block, emptyBlock, 16);
+            if (status != MFRC522::STATUS_OK) {
+              Serial.print("ERROR:Write failed for block ");
+              Serial.println(block);
+              allSuccess = false;
+              break;
+            }
+            
+            Serial.print("STATUS:Cleared block ");
+            Serial.println(block);
+          }
+          
+          // Halt PICC
+          mfrc522.PICC_HaltA();
+          mfrc522.PCD_StopCrypto1();
+          
+          setLED(false);
+          
+          if (allSuccess) {
+            Serial.println("OK:HISTORY_CLEARED:" + uid);
+            blinkLED(3, 200);
+          } else {
+            Serial.println("ERROR:Failed to clear some blocks");
+            blinkLED(5, 100);
+          }
+          
+          return;
+        }
+      }
+      delay(15);
+    }
+    delay(30);
+  }
+  
+  // Timeout reached
+  setLED(false);
+  Serial.println("ERROR:No card detected (timeout)");
 }
 
 uint32_t calculateChecksum(const char* text) {

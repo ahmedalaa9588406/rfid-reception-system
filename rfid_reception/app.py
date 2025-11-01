@@ -12,6 +12,7 @@ from rfid_reception.services.serial_comm import SerialCommunicationService
 from rfid_reception.reports import ModernReportsGenerator
 from rfid_reception.scheduler import TaskScheduler
 from rfid_reception.gui.main_window import MainWindow
+from rfid_reception.gui.login_window import LoginWindow
 
 
 # Configure logging
@@ -125,28 +126,49 @@ def main():
         )
         logger.info("Scheduler started")
         
-        # Create GUI
-        root = tk.Tk()
+        # Show login window first
+        login_root = tk.Tk()
         
-        # Set theme
-        style = ttk.Style()
-        try:
-            style.theme_use('clam')
-        except:
-            pass  # Use default theme if clam is not available
+        def on_login_success():
+            """Callback when login is successful."""
+            logger.info("Login successful, opening main application")
+            
+            # Create GUI for main window
+            main_root = tk.Tk()
+            
+            # Set theme
+            style = ttk.Style()
+            try:
+                style.theme_use('clam')
+            except:
+                pass  # Use default theme if clam is not available
+            
+            # Create main window
+            app = MainWindow(main_root, db_service, serial_service, reports_generator, scheduler, config)
+            
+            logger.info("Application started successfully")
+            
+            # Run main loop
+            main_root.mainloop()
+            
+            # Cleanup
+            scheduler.stop()
+            serial_service.disconnect()
+            logger.info("Application closed")
         
-        # Create main window
-        app = MainWindow(root, db_service, serial_service, reports_generator, scheduler, config)
+        # Create and show login window
+        login_window = LoginWindow(login_root, config, on_login_success)
         
-        logger.info("Application started successfully")
+        logger.info("Login window displayed")
         
-        # Run main loop
-        root.mainloop()
+        # Run login window loop
+        login_root.mainloop()
         
-        # Cleanup
-        scheduler.stop()
-        serial_service.disconnect()
-        logger.info("Application closed")
+        # If login window was closed without authentication, cleanup and exit
+        if not login_window.authenticated:
+            scheduler.stop()
+            serial_service.disconnect()
+            logger.info("Application closed without authentication")
         
     except Exception as e:
         logger.error(f"Fatal error: {e}", exc_info=True)
