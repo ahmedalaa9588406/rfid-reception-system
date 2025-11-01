@@ -708,7 +708,10 @@ class ModernMainWindow:
                 self.current_card_uid,
                 total_amount,
                 employee=self.config.get("employee_name", "Receptionist"),
-                notes=f"Manual entry: {display_value} | Offer: {offer_percent:.2f}% (+{offer_amount:.2f})"
+                notes=f"Manual entry: {display_value} | Offer: {offer_percent:.2f}% (+{offer_amount:.2f})",
+                amount_before_offer=amount,
+                offer_amount=offer_amount,
+                offer_percent=offer_percent
             )
             
             # CRITICAL FIX: ALWAYS store offer_percent (even if 0) to ensure it's tracked
@@ -793,7 +796,10 @@ class ModernMainWindow:
                     self.current_card_uid,
                     total_amount,
                     employee=self.config.get("employee_name", "Receptionist"),
-                    notes=f"Arduino write: {card_write_value} (added {amount:.2f} + offer {offer_amount:.2f} [{offer_percent:.2f}%])"
+                    notes=f"Arduino write: {card_write_value} (added {amount:.2f} + offer {offer_amount:.2f} [{offer_percent:.2f}%])",
+                    amount_before_offer=amount,
+                    offer_amount=offer_amount,
+                    offer_percent=offer_percent
                 )
                 
                 # CRITICAL FIX: ALWAYS store offer_percent (even if 0) to ensure it's tracked

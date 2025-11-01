@@ -45,8 +45,18 @@ class DatabaseService:
         finally:
             session.close()
     
-    def top_up(self, card_uid, amount, employee=None, notes=None):
-        """Add balance to a card and log transaction."""
+    def top_up(self, card_uid, amount, employee=None, notes=None, amount_before_offer=None, offer_amount=None, offer_percent=None):
+        """Add balance to a card and log transaction with offer details.
+        
+        Args:
+            card_uid: Card UID
+            amount: Total amount to add (including offer bonus)
+            employee: Employee name
+            notes: Transaction notes
+            amount_before_offer: Original payment amount before offer bonus
+            offer_amount: Bonus amount from offer
+            offer_percent: Offer percentage applied
+        """
         session = self.Session()
         try:
             card = session.query(Card).filter_by(card_uid=card_uid).first()
@@ -61,6 +71,9 @@ class DatabaseService:
                 card_uid=card_uid,
                 type='topup',
                 amount=amount,
+                amount_before_offer=amount_before_offer,
+                offer_amount=offer_amount,
+                offer_percent=offer_percent,
                 balance_after=card.balance,
                 employee=employee,
                 notes=notes
@@ -68,7 +81,7 @@ class DatabaseService:
             session.add(transaction)
             session.commit()
             
-            logger.info(f"Top-up successful: {card_uid} + {amount} = {card.balance}")
+            logger.info(f"Top-up successful: {card_uid} + {amount} (before offer: {amount_before_offer}, offer: {offer_amount}) = {card.balance}")
             return card.balance, transaction.id
         except SQLAlchemyError as e:
             session.rollback()
@@ -99,6 +112,9 @@ class DatabaseService:
                 'card_uid': t.card_uid,
                 'type': t.type,
                 'amount': t.amount,
+                'amount_before_offer': t.amount_before_offer,
+                'offer_amount': t.offer_amount,
+                'offer_percent': t.offer_percent,
                 'balance_after': t.balance_after,
                 'employee': t.employee,
                 'timestamp': t.timestamp,
