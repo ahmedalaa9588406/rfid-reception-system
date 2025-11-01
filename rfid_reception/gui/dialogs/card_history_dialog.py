@@ -37,7 +37,7 @@ class CardHistoryDialog:
         # Create dialog window
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("📜 سجل ألعاب البطاقة")
-        self.dialog.geometry("800x600")
+        self.dialog.geometry("900x900")
         self.dialog.configure(bg=LIGHT_BG)
         self.dialog.transient(parent)
         self.dialog.grab_set()
@@ -182,20 +182,20 @@ class CardHistoryDialog:
         button_frame = tk.Frame(self.dialog, bg=LIGHT_BG)
         button_frame.pack(fill='x', padx=15, pady=(5, 15))
         
-        # Close button
-        close_btn = tk.Button(
+        # Reset History button (pack right side first)
+        reset_btn = tk.Button(
             button_frame,
-            text="✖ إغلاق",
+            text="🗑️ مسح السجل",
             font=('Segoe UI', 10, 'bold'),
-            bg=DANGER_COLOR,
+            bg='#FF6B6B',
             fg='white',
             relief='flat',
             cursor='hand2',
             padx=15,
             pady=8,
-            command=self.dialog.destroy
+            command=self._reset_history
         )
-        close_btn.pack(side='left')
+        reset_btn.pack(side='right')
         
         # Refresh button
         refresh_btn = tk.Button(
@@ -210,7 +210,22 @@ class CardHistoryDialog:
             pady=8,
             command=self._load_history
         )
-        refresh_btn.pack(side='left', padx=(5, 0))
+        refresh_btn.pack(side='right', padx=(0, 5))
+        
+        # Close button
+        close_btn = tk.Button(
+            button_frame,
+            text="✖ إغلاق",
+            font=('Segoe UI', 10, 'bold'),
+            bg=DANGER_COLOR,
+            fg='white',
+            relief='flat',
+            cursor='hand2',
+            padx=15,
+            pady=8,
+            command=self.dialog.destroy
+        )
+        close_btn.pack(side='left')
     
     def _display_preloaded_history(self):
         """Display preloaded history data without reading from Arduino."""
@@ -411,5 +426,92 @@ class CardHistoryDialog:
             messagebox.showerror(
                 "خطأ",
                 f"حدث خطأ أثناء قراءة سجل البطاقة:\n\n{str(e)}",
+                parent=self.dialog
+            )
+    
+    def _reset_history(self):
+        """Reset/clear all game history from card blocks 9-15."""
+        # Confirm action with user
+        confirm = messagebox.askyesno(
+            "تأكيد مسح السجل",
+            "⚠️ تحذير!\n\n"
+            "هل أنت متأكد من أنك تريد مسح سجل الألعاب بالكامل من البطاقة؟\n\n"
+            "هذا الإجراء لا يمكن التراجع عنه!\n"
+            "سيتم مسح جميع البيانات المحفوظة في الكتل 9-15.",
+            parent=self.dialog
+        )
+        
+        if not confirm:
+            logger.info("History reset cancelled by user")
+            return
+        
+        # Check if Arduino is connected
+        if not self.serial_service.is_connected:
+            self.status_label.config(
+                text="❌ الأردوينو غير متصل! يرجى توصيل الأردوينو أولاً.",
+                fg=DANGER_COLOR
+            )
+            messagebox.showerror(
+                "خطأ في الاتصال",
+                "الأردوينو غير متصل.\n\nيرجى الاتصال بالأردوينو قبل مسح سجل البطاقة.",
+                parent=self.dialog
+            )
+            return
+        
+        # Update status
+        self.status_label.config(
+            text="⏳ جاري مسح سجل البطاقة... يرجى إبقاء البطاقة على القارئ...",
+            fg=TEXT_SECONDARY
+        )
+        self.dialog.update_idletasks()
+        
+        try:
+            # Call clear_history from serial service
+            success, uid_or_error = self.serial_service.clear_history()
+            
+            if success:
+                # Success - clear the treeview
+                for item in self.tree.get_children():
+                    self.tree.delete(item)
+                
+                self.uid_label.config(text=f"رقم البطاقة: {uid_or_error}")
+                self.status_label.config(
+                    text="✓ تم مسح سجل البطاقة بنجاح! جميع بيانات الألعاب تم حذفها.",
+                    fg=SUCCESS_COLOR
+                )
+                
+                messagebox.showinfo(
+                    "تم المسح بنجاح",
+                    f"✓ تم مسح سجل الألعاب بنجاح!\n\n"
+                    f"رقم البطاقة: {uid_or_error}\n\n"
+                    f"جميع بيانات الألعاب في الكتل 9-15 تم حذفها.",
+                    parent=self.dialog
+                )
+                
+                logger.info(f"Card history cleared successfully: {uid_or_error}")
+                
+            else:
+                # Error clearing history
+                self.status_label.config(
+                    text=f"❌ فشل في مسح السجل: {uid_or_error}",
+                    fg=DANGER_COLOR
+                )
+                messagebox.showerror(
+                    "خطأ في المسح",
+                    f"فشل في مسح سجل البطاقة:\n\n{uid_or_error}\n\n"
+                    f"يرجى التأكد من أن البطاقة على القارئ والمحاولة مرة أخرى.",
+                    parent=self.dialog
+                )
+                logger.error(f"Failed to clear history: {uid_or_error}")
+        
+        except Exception as e:
+            logger.error(f"Error clearing card history: {e}")
+            self.status_label.config(
+                text=f"❌ خطأ: {str(e)}",
+                fg=DANGER_COLOR
+            )
+            messagebox.showerror(
+                "خطأ",
+                f"حدث خطأ أثناء مسح سجل البطاقة:\n\n{str(e)}",
                 parent=self.dialog
             )

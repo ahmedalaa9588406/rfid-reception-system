@@ -192,6 +192,67 @@ class SerialCommunicationService:
         
         return False, "", "Failed to write card after retries"
     
+    def clear_history(self, retries=3) -> Tuple[bool, str]:
+        """
+        Request Arduino to clear/reset game history from card blocks 9-15.
+        
+        Returns:
+            Tuple[bool, str]: (success, uid_or_error_message)
+        """
+        if not self.is_connected or not self.connection:
+            return False, "Not connected to Arduino"
+        
+        for attempt in range(retries):
+            try:
+                # Clear input buffer before sending command
+                if hasattr(self.connection, "reset_input_buffer"):
+                    self.connection.reset_input_buffer()
+                
+                # Send clear history command
+                self.connection.write(b"CLEAR_HISTORY\n")
+                self.connection.flush()
+                logger.debug("Sent CLEAR_HISTORY command")
+                
+                # Wait for response with timeout
+                end_time = time.time() + 10.0  # 10 second timeout
+                
+                while time.time() < end_time:
+                    if self.connection.in_waiting > 0:
+                        response = self.connection.readline().decode('utf-8', errors='ignore').strip()
+                        if not response:
+                            continue
+                        
+                        logger.debug(f"Received: {response}")
+                        
+                        if response.startswith("OK:HISTORY_CLEARED:"):
+                            uid = response.split(":", 2)[2] if len(response.split(":", 2)) > 2 else "Unknown"
+                            logger.info(f"History cleared successfully for card: {uid}")
+                            return True, uid
+                        elif response.startswith("ERROR:"):
+                            error_msg = response.split(":", 1)[1]
+                            logger.warning(f"Error clearing history: {error_msg}")
+                            return False, error_msg
+                        elif response.startswith("STATUS:"):
+                            # Informational message, log and keep waiting
+                            logger.debug(f"Arduino status: {response}")
+                            continue
+                        else:
+                            # Ignore other messages
+                            logger.debug(f"Ignoring message during clear history: {response}")
+                    
+                    time.sleep(0.05)
+                
+                if attempt < retries - 1:
+                    logger.debug(f"Clear history attempt {attempt + 1} timed out, retrying...")
+                    time.sleep(0.3)
+                    
+            except serial.SerialException as e:
+                logger.error(f"Serial error during clear history (attempt {attempt + 1}): {e}")
+                if attempt < retries - 1:
+                    time.sleep(0.5)
+        
+        return False, "Failed to clear history after retries"
+    
     def read_history(self, retries=3) -> Tuple[bool, str, list]:
         """
         Request Arduino to read game history from card blocks 9-15.
