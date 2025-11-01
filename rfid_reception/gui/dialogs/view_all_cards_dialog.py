@@ -871,14 +871,16 @@ class ViewAllCardsDialog(tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", self.on_close)
     
     def _enrich_cards_with_offer_data(self):
-        """Fetch offer_percent from database for each card if missing."""
-        logger.info("Enriching cards with offer data...")
+        """Fetch offer_percent and last transaction details from database for each card."""
+        logger.info("Enriching cards with offer data and last transaction...")
         
         # SQLAlchemy uses 'engine' to get raw connections
         if not hasattr(self.db_service, 'engine'):
             logger.error("Cannot access database engine!")
             for card in self.cards:
                 card['offer_percent'] = 0
+                card['last_amount_before_offer'] = None
+                card['last_offer_amount'] = None
             return
         
         # Get a raw connection from SQLAlchemy engine
@@ -892,13 +894,12 @@ class ViewAllCardsDialog(tk.Toplevel):
                 try:
                     cursor = conn.cursor()
                     
-                    # Fetch the value directly
+                    # Fetch card offer_percent
                     cursor.execute(
                         "SELECT offer_percent FROM cards WHERE card_uid = ?",
                         (card_uid,)
                     )
                     result = cursor.fetchone()
-                    cursor.close()
                     
                     if result and result[0] is not None:
                         fetched_value = float(result[0])
@@ -907,10 +908,35 @@ class ViewAllCardsDialog(tk.Toplevel):
                     else:
                         card['offer_percent'] = 0.0
                         logger.debug(f"Card {card_uid}: No offer_percent found, defaulting to 0%")
+                    
+                    # Fetch last transaction details to show amount before offer
+                    cursor.execute(
+                        """SELECT amount_before_offer, offer_amount, offer_percent 
+                           FROM transactions 
+                           WHERE card_uid = ? AND type = 'topup'
+                           ORDER BY timestamp DESC 
+                           LIMIT 1""",
+                        (card_uid,)
+                    )
+                    last_tx = cursor.fetchone()
+                    
+                    if last_tx:
+                        card['last_amount_before_offer'] = last_tx[0]
+                        card['last_offer_amount'] = last_tx[1]
+                        card['last_tx_offer_percent'] = last_tx[2]
+                        logger.debug(f"✓ Last transaction for {card_uid}: paid={last_tx[0]}, bonus={last_tx[1]}")
+                    else:
+                        card['last_amount_before_offer'] = None
+                        card['last_offer_amount'] = None
+                        card['last_tx_offer_percent'] = None
+                    
+                    cursor.close()
                         
                 except Exception as e:
-                    logger.error(f"Error fetching offer_percent for {card_uid}: {e}", exc_info=True)
+                    logger.error(f"Error fetching data for {card_uid}: {e}", exc_info=True)
                     card['offer_percent'] = 0.0
+                    card['last_amount_before_offer'] = None
+                    card['last_offer_amount'] = None
         
         finally:
             conn.close()
@@ -1097,8 +1123,8 @@ class ViewAllCardsDialog(tk.Toplevel):
         scrollbar = ttk.Scrollbar(table_frame)
         scrollbar.pack(side='left', fill='y')
         
-        # Add Offer % column to track offer percentage per card - Arabic headers
-        columns = ("الحالة", "الموظف", "نسبة العرض %", "الرصيد", "معرّف البطاقة")
+        # Add columns including last payment amount (before offer)
+        columns = ("الحالة", "الموظف", "آخر مبلغ مدفوع", "نسبة العرض %", "الرصيد", "معرّف البطاقة")
         self.tree = ttk.Treeview(table_frame, 
                                  columns=columns,
                                  show='headings',
@@ -1108,8 +1134,8 @@ class ViewAllCardsDialog(tk.Toplevel):
         scrollbar.config(command=self.tree.yview)
         
         # Configure columns (reversed order for RTL)
-        col_widths = [80, 130, 90, 110, 140]  # Status, Employee, Offer%, Balance, UID
-        col_anchors = ['center', 'e', 'center', 'center', 'e']
+        col_widths = [80, 130, 110, 90, 110, 140]  # Status, Employee, Last Paid, Offer%, Balance, UID
+        col_anchors = ['center', 'e', 'center', 'center', 'center', 'e']
         
         for i, (col, width, anchor) in enumerate(zip(columns, col_widths, col_anchors)):
              self.tree.heading(col, text=col)
@@ -1153,10 +1179,21 @@ class ViewAllCardsDialog(tk.Toplevel):
             
             logger.debug(f"Card {uid}: Displaying offer as '{offer_display}'")
             
+            # Get last payment amount (before offer)
+            last_paid = card.get('last_amount_before_offer')
+            if last_paid is not None and last_paid > 0:
+                last_paid_display = f"{ArabicTextHelper.format_currency_arabic(last_paid)} ج"
+                last_paid_display = ArabicTextHelper.process_arabic_text(last_paid_display)
+            else:
+                last_paid_display = ArabicTextHelper.process_arabic_text("غير متاح")
+            
+            logger.debug(f"Card {uid}: Last paid amount = {last_paid}, display = '{last_paid_display}'")
+            
             # Values in reversed order for RTL display
             values = (
                 status,
                 employee if employee != 'N/A' else 'غير متاح',
+                last_paid_display,
                 offer_display,
                 f"{ArabicTextHelper.format_currency_arabic(balance)} جنيه",
                 uid[:12] + '...' if len(uid) > 12 else uid

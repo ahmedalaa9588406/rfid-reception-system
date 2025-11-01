@@ -31,7 +31,10 @@ class Transaction(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     card_uid = Column(String, ForeignKey('cards.card_uid'), nullable=False, index=True)
     type = Column(String, default='topup')  # topup, refund, adjust
-    amount = Column(Float, nullable=False)
+    amount = Column(Float, nullable=False)  # Total amount added (including offer)
+    amount_before_offer = Column(Float, nullable=True)  # Original payment amount (before offer bonus)
+    offer_amount = Column(Float, nullable=True)  # Bonus amount from offer
+    offer_percent = Column(Float, nullable=True)  # Offer percentage applied
     balance_after = Column(Float, nullable=False)
     employee = Column(String, nullable=True)
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
@@ -40,7 +43,7 @@ class Transaction(Base):
     card = relationship("Card", back_populates="transactions")
     
     def __repr__(self):
-        return f"<Transaction(card_uid='{self.card_uid}', type='{self.type}', amount={self.amount})>"
+        return f"<Transaction(card_uid='{self.card_uid}', type='{self.type}', amount={self.amount}, before_offer={self.amount_before_offer})>"
 
 
 def init_db(db_path='rfid_reception.db'):
